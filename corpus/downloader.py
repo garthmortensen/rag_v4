@@ -2,6 +2,7 @@ import csv
 import os
 import mimetypes
 import time
+import uuid
 import requests
 import random
 import re
@@ -14,7 +15,6 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 from urllib3.util.retry import Retry
 
-import base32_crockford
 from rich.console import Console
 from rich.progress import (
     Progress,
@@ -52,8 +52,6 @@ MAX_DELAY = 3
 RETRY_TOTAL = 3
 RETRY_BACKOFF_FACTOR = 1  # sleeps 1s, 2s, 4s between retries
 RETRY_STATUS_FORCELIST = [429, 500, 502, 503, 504]
-
-_doc_id_counter = 0
 
 console = Console()
 
@@ -121,14 +119,8 @@ def get_session():
 
 
 def generate_doc_id():
-    """Generate a unique Crockford Base32 doc_id from timestamp + counter."""
-    global _doc_id_counter
-    ts = int(
-        datetime.now(timezone.utc).timestamp() * 1000
-    )  # eg 1685625600000 for 2023-06-01T00:00:00Z
-    unique_int = ts * 1000 + _doc_id_counter  # eg 1685625600000000 + counter
-    _doc_id_counter += 1
-    return base32_crockford.encode(unique_int)  # eg "3W5E11264SGS" for 1685625600000000
+    """Generate a unique doc_id."""
+    return uuid.uuid4().hex
 
 
 def extract_author(url):

@@ -68,6 +68,12 @@ def cmd_query(args) -> None:
         print(pipeline.query(args.question, k=cfg.top_k))
 
 
+def cmd_serve(args) -> None:
+    from rag.web import run
+
+    run(host=args.host, port=args.port)
+
+
 def cmd_eval(args) -> None:
     from rag.config import load_config
     from rag.core.pipeline import build_pipeline
@@ -150,6 +156,11 @@ def main() -> None:
     p_eval.add_argument("--provider", default=None, help="Judge LLM provider (overrides rag.toml)")
     p_eval.add_argument("--model", default=None, help="Judge LLM model (overrides rag.toml)")
 
+    # serve
+    p_serve = sub.add_parser("serve", help="Start the web UI")
+    p_serve.add_argument("--host", default="127.0.0.1", help="Bind address")
+    p_serve.add_argument("--port", type=int, default=8000, help="Port")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -158,6 +169,8 @@ def main() -> None:
         cmd_query(args)
     elif args.command == "eval":
         cmd_eval(args)
+    elif args.command == "serve":
+        cmd_serve(args)
 
 
 if __name__ == "__main__":
