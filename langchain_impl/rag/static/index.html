@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG Query</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #16202a;
+      --muted: #5a6a7a;
+      --line: #dbe3ec;
+      --accent: #0f766e;
+      --accent-2: #115e59;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 15% 0%, #e6f3f1 0%, transparent 45%), var(--bg);
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 40px auto;
+      padding: 0 16px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    h1 { margin: 0 0 10px; font-size: 26px; }
+    p { margin: 0 0 14px; color: var(--muted); }
+
+    textarea {
+      width: 100%;
+      min-height: 96px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+    }
+
+    textarea:focus { border-color: var(--accent); }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font: inherit;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    button:hover { background: var(--accent-2); }
+
+    pre {
+      margin: 14px 0 0;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 60px;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card">
+      <h1>RAG Query</h1>
+      <p>Ask a question against the ingested corpus.</p>
+      <textarea id="q" placeholder="What changed in the stress test framework?"></textarea>
+      <div class="row">
+        <button id="ask">Ask</button>
+      </div>
+      <pre id="out">Ready.</pre>
+    </section>
+  </main>
+
+  <script>
+    const q = document.getElementById('q');
+    const out = document.getElementById('out');
+    const ask = document.getElementById('ask');
+
+    ask.addEventListener('click', async () => {
+      const question = q.value.trim();
+      if (!question) {
+        out.textContent = 'Enter a question first.';
+        return;
+      }
+      out.textContent = 'Thinking...';
+
+      try {
+        const resp = await fetch('/api/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, k: 5 })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || `HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        const sources = (data.sources || [])
+          .map((s, i) => `${i + 1}. ${s.title} (score=${s.score})`)
+          .join('\n');
+
+        out.textContent = `${data.answer || ''}\n\nSources:\n${sources || 'None'}`;
+      } catch (err) {
+        out.textContent = `Request failed: ${err.message}`;
+      }
+    });
+  </script>
+</body>
+</html>

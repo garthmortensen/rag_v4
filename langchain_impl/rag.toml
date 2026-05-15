@@ -1,0 +1,31 @@
+# RAG config file
+
+# Top-level rag namespace. Specific settings are grouped below
+[rag]
+
+# --- Chunking ---
+[rag.chunking]
+chunk_size    = 1000
+chunk_overlap = 100
+
+# --- Storage ---
+[rag.storage]
+collection_name = "rag_docs_lc"
+vector_db_dir   = "corpus/vector_db"
+
+# --- Embedder ---
+# Options: "huggingface" (requires uv sync --extra hf) or "ollama"
+[rag.embedder]
+type  = "huggingface"
+model = "all-MiniLM-L6-v2"
+
+# --- LLM ---
+# Providers: "ollama" | "openai" | "anthropic"
+[rag.llm]
+provider    = "ollama"
+model       = "llama3.2:3b"
+temperature = 0.1
+
+# --- Retrieval ---
+[rag.retrieval]
+top_k = 5

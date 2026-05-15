@@ -1,107 +1,47 @@
-# rag_v3
+# rag_v4
 
-## Project Purpose
+LangChain-only RAG implementation.
 
-Repo contains a small RAG framework:
-- Ingest documents (`loaders/`)
-- Split into chunks (`splitters/`)
-- Embed chunks (`embedders/`)
-- Store/retrieve vectors (`stores/`)
-- Orchestrate retrieval + LLM calls (`core/pipeline.py`)
-- Provide provider-specific LLM adapters (`llms/`)
+## Repository layout
 
-## File Map (important files)
-- [rag/__main__.py](rag/__main__.py) — CLI entrypoint
-- [rag/config.py](rag/config.py) — config loader & defaults
-- [rag/core/pipeline.py](rag/core/pipeline.py) — main pipeline orchestration
-- [rag/core/protocols.py](rag/core/protocols.py) — type protocols/interfaces
-- [rag/embedders](rag/embedders) — embedder implementations
-- [rag/llms](rag/llms) — LLM provider adapters
-- [rag/loaders](rag/loaders) — document loaders (pdf, text)
-- [rag/splitters](rag/splitters) — chunking logic
-- [rag/stores](rag/stores) — vector DB integrations (chroma)
-
-## Architecture Overview
-
-- The entrypoint loads configuration, prepares the pipeline, and executes ingestion or query flows.
-- Each subsystem provides a small interface (protocols) so components are swappable.
-
-## Class Diagram (Mermaid)
-
-```mermaid
-classDiagram
-    class Pipeline {
-        +run_ingest(path)
-        +run_query(query)
-    }
-    class Loader {
-        +load(path) List<Document>
-    }
-    class Splitter {
-        +split(Document) List<Chunk>
-    }
-    class Embedder {
-        +embed(List<Chunk>) List<Vector>
-    }
-    class Store {
-        +add(List<Vector>)
-        +query(Vector, top_k) List<Chunk>
-    }
-    class LLM {
-        +generate(prompt, **kwargs) Response
-    }
-
-    Pipeline --> Loader : uses
-    Pipeline --> Splitter : uses
-    Pipeline --> Embedder : uses
-    Pipeline --> Store : uses
-    Pipeline --> LLM : uses
-
-    Loader <|-- rag.loaders.pdf.PDFLoader
-    Loader <|-- rag.loaders.text.TextLoader
-    Splitter <|-- rag.splitters.recursive.RecursiveSplitter
-    Embedder <|-- rag.embedders.huggingface.HFEmbedder
-    Embedder <|-- rag.embedders.ollama.OllamaEmbedder
-    Store <|-- rag.stores.chroma.ChromaStore
-    LLM <|-- rag.llms.ollama.Ollama
-    LLM <|-- rag.llms.openai.OpenAI
+```text
+corpus/
+  raw_data/           # source documents (HTML, CSV, PDF)
+  vector_db/          # Chroma persistence
+langchain_impl/
+  rag/
+    core/pipeline.py  # LangChain + LCEL pipeline
+    eval/             # eval dataset, harness, metrics, types
+    static/index.html # web UI
+    web.py            # FastAPI server
+  rag.toml            # runtime config for langchain_impl
 ```
 
-## Pipeline Flowchart (Mermaid)
+## Quick start
 
-```mermaid
-flowchart TD
-  A[Start] --> B[Load Documents]
-  B --> C[Split into Chunks]
-  C --> D[Create Embeddings]
-  D --> E[Store in Vector DB]
-  E --> F[Client Query]
-  F --> G[Retrieve top_k Chunks]
-  G --> H[Construct LLM Prompt]
-  H --> I[LLM Generate Answer]
-  I --> J[Return Answer]
+```bash
+cd langchain_impl
+uv sync --extra web --extra ollama
+uv run python -m rag ingest ../corpus/raw_data/
+uv run python -m rag serve
 ```
 
-## Sequence Diagram: Query
+Open <http://127.0.0.1:8000>
 
-```mermaid
-sequenceDiagram
-  participant Client
-  participant Pipeline
-  participant Store
-  participant LLM
+## CLI
 
-  Client->>Pipeline: query(q)
-  Pipeline->>Store: search(q_embedding, top_k)
-  Store-->>Pipeline: top_k chunks
-  Pipeline->>LLM: generate(prompt_with_chunks)
-  LLM-->>Pipeline: answer
-  Pipeline-->>Client: answer
+```bash
+uv run python -m rag ingest <sources...>
+uv run python -m rag query "question"
+uv run python -m rag query "question" --stream
+uv run python -m rag eval
+uv run python -m rag eval --fast
+uv run python -m rag serve [--host] [--port]
 ```
 
-## Config Example (nested TOML)
+## Configuration
 
-The project uses `rag.toml` with nested tables. Example structure produced in this repo:
+Edit `langchain_impl/rag.toml`:
 
 ```toml
 [rag.chunking]
@@ -109,15 +49,15 @@ chunk_size = 1000
 chunk_overlap = 100
 
 [rag.storage]
-collection_name = "rag_docs"
+collection_name = "rag_docs_lc"
 vector_db_dir = "corpus/vector_db"
 
 [rag.embedder]
-type = "huggingface"
+type = "huggingface"   # or "ollama"
 model = "all-MiniLM-L6-v2"
 
 [rag.llm]
-provider = "ollama"
+provider = "ollama"    # or "openai", "anthropic"
 model = "llama3.2:3b"
 temperature = 0.1
 
@@ -128,35 +68,7 @@ top_k = 5
 ollama_host = "http://localhost:11434"
 ```
 
-## Quickstart
+## Notes
 
-1. Create a virtualenv and install (editable):
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-2. Run tests:
-
-```bash
-pytest -q
-```
-
-3. Run CLI (example):
-
-```bash
-python -m rag --help
-# or run an ingest
-python -m rag ingest /path/to/docs
-# or query
-python -m rag query "What is ...?"
-```
-
-## How to read the code
-
-- Start at [rag/__main__.py](rag/__main__.py) to see CLI wiring.
-- Inspect [rag/core/pipeline.py](rag/core/pipeline.py) for the main high-level flow.
-- Look at [rag/core/protocols.py](rag/core/protocols.py) to understand interfaces you can implement.
-
+- API keys for OpenAI/Anthropic are read from environment variables.
+- `eval --fast` skips LLM-based ragas scoring and runs embedding-only checks.
