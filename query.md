@@ -5,11 +5,11 @@
 ```mermaid
 flowchart TD
     CSV[data_sources.csv]
-    DL[downloader.py\nfetch each URL]
-    RAW[corpus/raw_data/\n.html · .pdf · .csv]
-    INGEST[ingest.py\nload → split → embed → store]
-    DB[(ChromaDB\nvector_db/)]
-    Q[query.py\nquestion → answer]
+    DL["downloader.py<br/>fetch each URL"]
+    RAW["corpus/raw_data/<br/>.html · .pdf · .csv"]
+    INGEST["ingest.py<br/>load → split → embed → store"]
+    DB[("ChromaDB<br/>vector_db/")]
+    Q["query.py<br/>question → answer"]
 
     CSV --> DL --> RAW --> INGEST --> DB
     DB --> Q
@@ -19,15 +19,15 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    CFG[load_config\nrag.toml]
-    EMB[build_embedder\nHuggingFaceEmbeddings]
-    VS[build_vectorstore\nChroma read-only]
-    LLM[build_llm\nChatOllama]
+    CFG["load_config<br/>rag.toml"]
+    EMB["build_embedder<br/>HuggingFaceEmbeddings"]
+    VS["build_vectorstore<br/>Chroma read-only"]
+    LLM["build_llm<br/>ChatOllama"]
     Q([question])
-    RET[retrieve_chunks\nsimilarity_search top-k]
-    CTX[build_context\njoin chunk text]
-    PRM[build_prompt\nPROMPT_TEMPLATE]
-    ASK[ask_llm\nllm.invoke]
+    RET["retrieve_chunks<br/>similarity_search top-k"]
+    CTX["build_context<br/>join chunk text"]
+    PRM["build_prompt<br/>PROMPT_TEMPLATE"]
+    ASK["ask_llm<br/>llm.invoke"]
     RES([answer + sources])
 
     CFG --> EMB --> VS
@@ -45,10 +45,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    CFG[load_config\nrag.toml]
-    EMB[build_embedder\nHuggingFaceEmbeddings]
-    VS[build_vectorstore\nChroma read-only]
-    LLM[build_llm\nChatOllama]
+    CFG["load_config<br/>rag.toml"]
+    EMB["build_embedder<br/>HuggingFaceEmbeddings"]
+    VS["build_vectorstore<br/>Chroma read-only"]
+    LLM["build_llm<br/>ChatOllama"]
     Q([question])
 
     subgraph build_chain["build_chain() → chain.invoke(question)"]
@@ -56,14 +56,14 @@ flowchart TD
 
         subgraph answer_branch["answer branch"]
             direction LR
-            RPAR["context: retriever\nquestion: passthrough"]
+            RPAR["context: retriever<br/>question: passthrough"]
             PRM[ChatPromptTemplate]
             OL[ChatOllama]
             STR[StrOutputParser]
             RPAR --> PRM --> OL --> STR
         end
 
-        RET2["sources: retriever\ntop-k docs"]
+        RET2["sources: retriever<br/>top-k docs"]
     end
 
     ANS([answer: str])
