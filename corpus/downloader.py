@@ -1,589 +1,128 @@
 import csv
 import os
-import mimetypes
-import time
-import uuid
-import requests
 import random
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
-from urllib.parse import urlparse
+import time
+from pathlib import Path
 
-from requests.adapters import HTTPAdapter
-from requests.exceptions import RequestException
-from urllib3.util.retry import Retry
+import requests
 
-from rich.console import Console
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    BarColumn,
-    TextColumn,
-    TimeRemainingColumn,
+CSV_FILE = "corpus/data_sources.csv"
+OUTPUT_DIR = "corpus/raw_data2"
+TIMEOUT = 60
+USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
-from rich.table import Table
-from rich.panel import Panel
 
-# Default Configuration
-DEFAULT_CSV = "corpus/data_sources.csv"
-CITATIONS_CSV = "corpus/citations.csv"
-DEFAULT_DIR = "corpus/raw_data"
-CITATIONS_DIR = "corpus/raw_data/citations"
-LOG_FILE = "corpus/download.log"
-METADATA_CSV = "corpus/metadata.csv"
-METADATA_FIELDS = [
-    "doc_id",
-    "source_type",
-    "source_url",
-    "local_path",
-    "title",
-    "category",
-    "source_org",
-    "author",
-    "retrieved_at",
-    "last_modified_at",
-    "content_type",
-    "content_length_bytes",
-]
-MIN_DELAY = 1
-MAX_DELAY = 3
-RETRY_TOTAL = 3
-RETRY_BACKOFF_FACTOR = 1  # sleeps 1s, 2s, 4s between retries
-RETRY_STATUS_FORCELIST = [429, 500, 502, 503, 504]
-
-console = Console()
+def sanitize(text):
+    text = re.sub(r"[^\w\s-]", "", text)  # Remove special chars except whitespace and hyphens
+    return re.sub(r"[\s_-]+", "_", text).strip("_").lower()  # Replace whitespace/hyphens with single underscore
 
 
-def print_ascii_banner():
-    console.print(
-        Panel.fit(
-            """[bold deep_sky_blue1]
-     ▌       ▜      ▌   ▌  ▗   
-    ▛▌▛▌▌▌▌▛▌▐ ▛▌▀▌▛▌  ▛▌▀▌▜▘▀▌
-    ▙▌▙▌▚▚▘▌▌▐▖▙▌█▌▙▌▄▖▙▌█▌▐▖█▌
-[/bold deep_sky_blue1]
- --------------------------------
-""",
-            border_style="grey39",
-        )
-    )
-
-
-def sanitize_filename(text):
-    # Remove non-alphanumeric characters except spaces and hyphens
-    clean_text = re.sub(r"[^\w\s-]", "", text)
-    # Replace spaces, hyphens, and existing underscores with a single underscore
-    clean_text = re.sub(r"[\s_-]+", "_", clean_text)
-    # Lowercase and strip leading/trailing underscores
-    return clean_text.strip("_").lower()
-
-
-def ensure_directory(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-
-def get_headers():
-    # Browser-like headers improve success rates on sites that block
-    # default Python clients or drop connections without responding.
-    return {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "close",
-        "Upgrade-Insecure-Requests": "1",
-    }
-
-
-def get_session():
-    """Build a requests Session with retry and exponential backoff."""
-    session = requests.Session()
-    retry = Retry(
-        total=RETRY_TOTAL,  # Total number of retries
-        backoff_factor=RETRY_BACKOFF_FACTOR,  # Exponential backoff factor
-        status_forcelist=RETRY_STATUS_FORCELIST,  # HTTP status codes to trigger a retry
-        allowed_methods=["GET"],
-        raise_on_status=False,
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
-
-
-def generate_doc_id():
-    """Generate a unique doc_id."""
-    return uuid.uuid4().hex
-
-
-def extract_author(url):
-    """Derive author/publisher from the URL domain."""
-    return urlparse(url).hostname or "Unknown"
-
-
-def load_existing_metadata(path):
-    """Load existing metadata CSV into a dict keyed by local_path."""
-    metadata = {}
-    if os.path.exists(path):
-        with open(path, mode="r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                metadata[row["local_path"]] = row
-    return metadata
-
-
-def save_metadata(metadata, path):
-    """Write metadata dict to CSV, sorted by doc_id."""
-    rows = sorted(metadata.values(), key=lambda r: r["doc_id"])
-    with open(path, mode="w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=METADATA_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def capture_metadata(
-    response, filepath, filetype, url, name, category="", source_org=""
-):
-    """Build a metadata dict from a successful download response."""
-    last_modified_raw = response.headers.get("Last-Modified", "")
-    if last_modified_raw:
-        last_modified = datetime.strptime(
-            last_modified_raw, "%a, %d %b %Y %H:%M:%S %Z"
-        ).strftime("%Y%m%d%H%M%S")
-    else:
-        last_modified = ""
-    return {
-        "doc_id": generate_doc_id(),
-        "source_type": filetype,
-        "source_url": url,
-        "local_path": filepath,
-        "title": name,
-        "category": category,
-        "source_org": source_org,
-        "author": extract_author(url),
-        "retrieved_at": datetime.now(timezone.utc).strftime("%Y%m%d%H%M"),
-        "last_modified_at": last_modified,
-        "content_type": response.headers.get("Content-Type", ""),
-        "content_length_bytes": response.headers.get("Content-Length", ""),
-    }
-
-
-def capture_metadata_from_file(
-    filepath: str,
-    filetype: str,
-    url: str,
-    name: str,
-    category: str = "",
-    source_org: str = "",
-) -> dict:
-    """Build a metadata dict for a successful download without an HTTP response.
-
-    Used for wget/curl fallback downloads.
-    """
-    guessed_type, _ = mimetypes.guess_type(filepath)
-    content_type = guessed_type or (
-        "application/pdf" if filetype.lower() == "pdf" else ""
-    )
-    try:
-        size = str(os.path.getsize(filepath))
-    except OSError:
-        size = ""
-
-    return {
-        "doc_id": generate_doc_id(),
-        "source_type": filetype,
-        "source_url": url,
-        "local_path": filepath,
-        "title": name,
-        "category": category,
-        "source_org": source_org,
-        "author": extract_author(url),
-        "retrieved_at": datetime.now(timezone.utc).strftime("%Y%m%d%H%M"),
-        "last_modified_at": "",
-        "content_type": content_type,
-        "content_length_bytes": size,
-    }
-
-
-def _write_response_to_file(response: requests.Response, filepath: str) -> None:
-    """Stream response content to *filepath* safely."""
-    tmp = f"{filepath}.part"
-    with open(tmp, "wb") as out_file:
-        for chunk in response.iter_content(chunk_size=1024 * 256):
-            if chunk:
-                out_file.write(chunk)
-    os.replace(tmp, filepath)
-
-
-def _download_with_wget(url: str, filepath: str, user_agent: str, timeout_s: int) -> bool:
-    """Fallback downloader using wget if available."""
+def download_with_wget(url, filepath):
     wget = shutil.which("wget")
     if not wget:
         return False
-
-    tmp = f"{filepath}.part"
-    cmd = [
-        wget,
-        "--quiet",
-        "--no-verbose",
-        "--max-redirect=10",
-        "--timeout",
-        str(timeout_s),
-        "--tries",
-        "3",
-        "--user-agent",
-        user_agent,
-        "--output-document",
-        tmp,
-        url,
-    ]
+    tmp = filepath + ".part"
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            # wget flags: --quiet, --timeout, --tries, --user-agent, --output-document
+            [wget, "--quiet", f"--timeout={TIMEOUT}", "--tries=3",
+             f"--user-agent={USER_AGENT}", f"--output-document={tmp}", url],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
         os.replace(tmp, filepath)
         return True
     except Exception:
-        try:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        except OSError:
-            pass
+        if os.path.exists(tmp):
+            os.remove(tmp)
         return False
 
 
-def _download_with_curl(url: str, filepath: str, user_agent: str, timeout_s: int) -> bool:
-    """Fallback downloader using curl if available."""
+def download_with_curl(url, filepath):
     curl = shutil.which("curl")
     if not curl:
         return False
-
-    tmp = f"{filepath}.part"
-    cmd = [
-        curl,
-        "--fail",
-        "--location",
-        "--silent",
-        "--show-error",
-        "--max-time",
-        str(timeout_s),
-        "--retry",
-        "3",
-        "--retry-delay",
-        "1",
-        "-A",
-        user_agent,
-        "-o",
-        tmp,
-        url,
-    ]
+    tmp = filepath + ".part"
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            # curl flags: --fail, --location, --silent, --max-time, --retry, -A (user-agent), -o (output)
+            [curl, "--fail", "--location", "--silent", f"--max-time={TIMEOUT}",
+             "--retry=3", "-A", USER_AGENT, "-o", tmp, url],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
         os.replace(tmp, filepath)
         return True
     except Exception:
-        try:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        except OSError:
-            pass
+        if os.path.exists(tmp):
+            os.remove(tmp)
         return False
 
 
-def _download_with_fallback(session: requests.Session, url: str, filepath: str, timeout_s: int = 60):
-    """Try requests first; on failure, fall back to wget/curl.
-
-    Returns a tuple: (used_response, used_fallback)
-    - used_response: requests.Response | None
-    - used_fallback: bool
-    """
+def download_with_fallback(url, filepath):
+    """Try requests → wget → curl. Raises if all fail."""
     try:
-        response = session.get(url, timeout=timeout_s, stream=True)
+        response = requests.get(url, timeout=TIMEOUT, headers={"User-Agent": USER_AGENT})
         response.raise_for_status()
-        _write_response_to_file(response, filepath)
-        return response, False
-    except RequestException:
-        ua = session.headers.get("User-Agent", get_headers().get("User-Agent", ""))
-        if _download_with_wget(url, filepath, ua, timeout_s):
-            return None, True
-        if _download_with_curl(url, filepath, ua, timeout_s):
-            return None, True
-        raise
+        Path(filepath).write_bytes(response.content)
+        return
+    except Exception:
+        pass
+    if download_with_wget(url, filepath):
+        return
+    if download_with_curl(url, filepath):
+        return
+    raise RuntimeError(f"All download methods failed for {url}")
 
 
-def construct_filepath(base_dir, category, name, filetype):
-    # Flatten structure: all files go directly into base_dir
-    # We include the category in the filename to keep them organized and unique
-    clean_category = sanitize_filename(category)
-    clean_name = sanitize_filename(name)
-
-    filename = f"{clean_category}_{clean_name}.{filetype}"
-    return os.path.join(base_dir, filename)
-
-
-def polite_sleep(min_d, max_d):
-    """Sleep with a countdown."""
-    sleep_time = random.uniform(min_d, max_d)
-    steps = int(sleep_time * 10)  # Update every 0.1s
-
-    with console.status(
-        f"[yellow]Politely pausing for {sleep_time:.1f}s...[/yellow]"
-    ) as status:
-        for _ in range(steps):
-            time.sleep(0.1)
-            sleep_time -= 0.1
-            status.update(
-                f"[yellow]Politely pausing for: {max(0, sleep_time):.1f}s...[/yellow]"
-            )
+def polite_sleep():
+    delay = random.uniform(1, 3)
+    print(f"  Sleeping {delay:.1f}s...")
+    time.sleep(delay)
 
 
 def save_summary(results):
-    """Print and log the download summary table."""
-    console.print("\n")
-    table = Table(
-        title="Download Summary", show_header=True, header_style="bold magenta"
-    )
-    table.add_column("Category", style="cyan")
-    table.add_column("Document Name", style="white")
-    table.add_column("Status", justify="right")
-
-    for res in results:
-        table.add_row(res["category"], res["name"], res["status"])
-
-    console.print(table)
-
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        file_console = Console(file=f, force_terminal=False)
-        file_console.print(table)
+    print("\n--- Download Summary ---")
+    for r in results:
+        print(f"  {r['status']:8}  {r['category']} / {r['name']}")
 
 
 def download_files():
-    print_ascii_banner()
-
-    ensure_directory(DEFAULT_DIR)
-    headers = get_headers()
-    session = get_session()
-    session.headers.update(headers)
-    metadata = load_existing_metadata(METADATA_CSV)
-
+    Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     results = []
 
-    # read the CSV file which maps corpus and links
-    try:
-        with open(DEFAULT_CSV, mode="r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-    except FileNotFoundError:
-        console.print(
-            f"[bold red]Error:[/bold red] CSV file not found at {DEFAULT_CSV}"
-        )
-        return
+    with open(CSV_FILE, encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
 
-    # progress bar
-    progress_layout = [
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-        TextColumn("({task.completed}/{task.total})"),
-    ]
+    for row in rows:
+        name     = row.get("Name", "").strip()
+        category = row.get("Category", "").strip()
+        filetype = row.get("Filetype", "html").strip().lower()
+        url      = row.get("Link", "").strip()
 
-    with Progress(*progress_layout, console=console) as progress:
-        task_id = progress.add_task("Processing...", total=len(rows))
+        if not url:
+            continue
 
-        # step through each row in csv and download the file if it doesn't exist, then update progress bar
-        for row in rows:
-            category = row.get("Category", "Uncategorized").strip()
-            source_org = row.get("Source", "").strip()
-            name = row.get("Name", "Unknown").strip()
-            filetype = row.get("Filetype", "html").strip().lower()
-            url = row.get("Link", "").strip()
+        filepath = os.path.join(OUTPUT_DIR, f"{sanitize(category)}_{sanitize(name)}.{filetype}")
 
-            if not url:
-                progress.advance(task_id)
-                continue
+        if os.path.exists(filepath):
+            print(f"  Exists: {name}")
+            results.append({"name": name, "category": category, "status": "Skipped"})
+            continue
 
-            # this is used for both the download path and the metadata entry, so we want it before we check for existing file
-            filepath = construct_filepath(DEFAULT_DIR, category, name, filetype)
-            result_status = "Unknown"
+        print(f"  Downloading: {name}...")
+        try:
+            download_with_fallback(url, filepath)
+            results.append({"name": name, "category": category, "status": "OK"})
+            polite_sleep()
+        except Exception as e:
+            print(f"  Failed: {e}")
+            results.append({"name": name, "category": category, "status": "Failed"})
 
-            progress.update(task_id, description=f"Processing: [bold]{name}[/bold]")
-
-            # Check if the file marked for download already exists
-            if os.path.exists(filepath):
-                result_status = "[yellow]Skipped (Existed)[/yellow]"
-                console.print(f"  Exists: {name}")
-            else:
-                try:
-                    console.print(f"  Downloading: {name}...")
-                    response, used_fallback = _download_with_fallback(
-                        session, url, filepath, timeout_s=60
-                    )
-                    result_status = "[green]Downloaded[/green]"
-
-                    if used_fallback or response is None:
-                        metadata[filepath] = capture_metadata_from_file(
-                            filepath, filetype, url, name, category, source_org
-                        )
-                    else:
-                        metadata[filepath] = capture_metadata(
-                            response, filepath, filetype, url, name, category, source_org
-                        )
-
-                    # Only sleep if we actually downloaded something
-                    polite_sleep(MIN_DELAY, MAX_DELAY)
-
-                except Exception as e:
-                    result_status = "[red]Failed[/red]"
-                    console.print(f"  [red]Error:[/red] {e}")
-
-            results.append(
-                {"name": name, "category": category, "status": result_status}
-            )
-            progress.advance(task_id)
-
-    # Save metadata
-    save_metadata(metadata, METADATA_CSV)
-    console.print(f"Metadata saved to: [bold]{METADATA_CSV}[/bold]")
-
-    # Final Summary Table
     save_summary(results)
-
-    console.print(
-        f"\n[green]Job Complete.[/green] Files saved to: [bold]{DEFAULT_DIR}[/bold]"
-    )
-    console.print(f"Metadata saved to: [bold]{METADATA_CSV}[/bold]")
-    console.print(f"Summary saved to: [bold]{LOG_FILE}[/bold]")
-
-
-def download_citations():
-    """Download papers listed in corpus/citations.csv that have a download_url.
-
-    Files are saved to corpus/raw_data/citations/ and metadata is
-    appended to the shared corpus/metadata.csv so the ingestion
-    pipeline can pick them up.
-    """
-    if not os.path.exists(CITATIONS_CSV):
-        console.print(f"[dim]No citations file at {CITATIONS_CSV} — skipping.[/dim]")
-        return
-
-    ensure_directory(CITATIONS_DIR)
-    headers = get_headers()
-    session = get_session()
-    session.headers.update(headers)
-    metadata = load_existing_metadata(METADATA_CSV)
-
-    # Read citations CSV — only rows that have a download_url
-    try:
-        with open(CITATIONS_CSV, mode="r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = [r for r in reader if r.get("download_url", "").strip()]
-    except FileNotFoundError:
-        return
-
-    if not rows:
-        console.print("[dim]No downloadable citations found.[/dim]")
-        return
-
-    console.print(
-        f"\n[bold]📚 Citations:[/bold] {len(rows)} paper(s) with download URLs"
-    )
-
-    results = []
-
-    progress_layout = [
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-        TextColumn("({task.completed}/{task.total})"),
-    ]
-
-    with Progress(*progress_layout, console=console) as progress:
-        task_id = progress.add_task("Citations...", total=len(rows))
-
-        for row in rows:
-            authors = row.get("authors", "Unknown").strip()
-            year = row.get("year", "").strip()
-            title = row.get("title", "Unknown").strip()
-            category = row.get("category", "Unknown").strip()
-            download_url = row.get("download_url", "").strip()
-            resolved_url = row.get("resolved_url", "").strip()
-
-            # Derive filetype from the download URL
-            url_path = download_url.rsplit(".", 1)
-            filetype = url_path[-1].lower() if len(url_path) > 1 else "pdf"
-            if filetype not in {"pdf", "html", "csv", "xlsx", "txt"}:
-                filetype = "pdf"
-
-            # Build a short name for the file
-            short_name = f"{sanitize_filename(authors.split(',')[0])}_{year}"
-            filepath = os.path.join(CITATIONS_DIR, f"{short_name}.{filetype}")
-
-            display_name = f"{authors} ({year})"
-            progress.update(
-                task_id,
-                description=f"Citations: [bold]{display_name[:50]}[/bold]",
-            )
-
-            if os.path.exists(filepath):
-                result_status = "[yellow]Skipped (Existed)[/yellow]"
-                console.print(f"  Exists: {display_name}")
-            else:
-                try:
-                    console.print(f"  Downloading: {display_name}...")
-                    response, used_fallback = _download_with_fallback(
-                        session, download_url, filepath, timeout_s=90
-                    )
-                    result_status = "[green]Downloaded[/green]"
-
-                    if used_fallback or response is None:
-                        metadata[filepath] = capture_metadata_from_file(
-                            filepath,
-                            filetype,
-                            resolved_url or download_url,
-                            title,
-                            f"Citation — {category}",
-                            "Academic",
-                        )
-                    else:
-                        metadata[filepath] = capture_metadata(
-                            response,
-                            filepath,
-                            filetype,
-                            resolved_url or download_url,
-                            title,
-                            f"Citation — {category}",
-                            "Academic",
-                        )
-
-                    polite_sleep(MIN_DELAY, MAX_DELAY)
-
-                except Exception as e:
-                    result_status = "[red]Failed[/red]"
-                    console.print(f"  [red]Error:[/red] {e}")
-
-            results.append(
-                {"name": display_name, "category": category, "status": result_status}
-            )
-            progress.advance(task_id)
-
-    # Save metadata (shared with main downloads)
-    save_metadata(metadata, METADATA_CSV)
-
-    # Summary
-    save_summary(results)
-    console.print(
-        f"\n[green]Citations complete.[/green] "
-        f"Files saved to: [bold]{CITATIONS_DIR}[/bold]"
-    )
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ chunk_overlap = 100
 
 # --- Storage ---
 [rag.storage]
-collection_name = "rag_docs_lc"
+collection_name = "rag_docs"
 vector_db_dir   = "corpus/vector_db"
 
 # --- Embedder ---
@@ -29,3 +29,7 @@ temperature = 0.1
 # --- Retrieval ---
 [rag.retrieval]
 top_k = 5
+
+# --- Ingestion ---
+[rag.ingestion]
+raw_data_dir = "corpus/raw_data"

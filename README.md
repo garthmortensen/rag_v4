@@ -71,4 +71,4 @@ ollama_host = "http://localhost:11434"
 ## Notes
 
 - API keys for OpenAI/Anthropic are read from environment variables.
-- `eval --fast` skips LLM-based ragas scoring and runs embedding-only checks.
+  - `eval --fast` skips LLM-based ragas scoring and runs embedding-only checks.
