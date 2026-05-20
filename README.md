@@ -1,74 +1,103 @@
 # rag_v4
 
-LangChain-only RAG implementation.
+LangChain RAG pipeline over a local corpus of HTML, PDF, and CSV documents.
 
 ## Repository layout
 
 ```text
 corpus/
-  raw_data/           # source documents (HTML, CSV, PDF)
-  vector_db/          # Chroma persistence
-langchain_impl/
-  rag/
-    core/pipeline.py  # LangChain + LCEL pipeline
-    eval/             # eval dataset, harness, metrics, types
-    static/index.html # web UI
-    web.py            # FastAPI server
-  rag.toml            # runtime config for langchain_impl
+  data_sources.csv      # source list: Name, Category, Filetype, Link
+  downloader.py         # step 1 — fetch source documents
+  raw_data/             # documents already downloaded
+  raw_data2/            # output directory for downloader.py
+  vector_db/            # ChromaDB persistence (created by ingest)
+rag/
+  config.py           # loads rag.toml into a Config dataclass
+  ingest.py           # step 2 — embed documents into ChromaDB
+  query.py            # step 3 — ask questions, get answers
 ```
 
-## Quick start
+## Setup
 
 ```bash
-cd langchain_impl
-uv sync --extra web --extra ollama
-uv run python -m rag ingest ../corpus/raw_data/
-uv run python -m rag serve
+uv sync --extra hf --extra ollama
 ```
 
-Open <http://127.0.0.1:8000>
+`--extra hf` installs the HuggingFace sentence-transformers embedder.  
+`--extra ollama` installs the Ollama LLM client. Ollama must be running locally.
 
-## CLI
+## Step 1 — Download source documents
+
+Run from the **repo root**:
 
 ```bash
-uv run python -m rag ingest <sources...>
-uv run python -m rag query "question"
-uv run python -m rag query "question" --stream
-uv run python -m rag eval
-uv run python -m rag eval --fast
-uv run python -m rag serve [--host] [--port]
+python corpus/downloader.py
 ```
+
+Reads URLs from `corpus/data_sources.csv` and saves files to `corpus/raw_data2/`.  
+Already-downloaded files are skipped. Update `raw_data_dir` in `rag.toml` to point at `raw_data2/` if you want to ingest the freshly downloaded files instead of the existing `raw_data/`.
+
+## Step 2 — Ingest documents into ChromaDB
+
+Run from `langchain_impl/`:
+
+```bash
+uv run python -m rag.ingest
+```
+
+Reads all `.html`, `.pdf`, and `.csv` files from `raw_data_dir`, splits them into
+chunks, embeds each chunk with the HuggingFace model, and stores everything in
+ChromaDB. **Fully rebuilds the collection on every run.**
+
+## Step 3 — Query
+
+**Interactive REPL** (builds the chain once, loop until you quit):
+
+```bash
+uv run python -m rag.query
+```
+
+**Single-shot from a script or Python session:**
+
+```python
+from rag.query import query
+
+result = query("What happens to bank capital under the severely adverse scenario?")
+print(result["answer"])
+for chunk in result["sources"]:
+    print(chunk.metadata["source"])
+```
+
+`result` is always `{"answer": str, "sources": list[Document]}`.
 
 ## Configuration
 
-Edit `langchain_impl/rag.toml`:
+Edit `rag.toml`:
 
 ```toml
 [rag.chunking]
-chunk_size = 1000
+chunk_size    = 1000
 chunk_overlap = 100
 
 [rag.storage]
-collection_name = "rag_docs_lc"
-vector_db_dir = "corpus/vector_db"
+collection_name = "rag_docs"
+vector_db_dir   = "corpus/vector_db"
 
 [rag.embedder]
-type = "huggingface"   # or "ollama"
+type  = "huggingface"
 model = "all-MiniLM-L6-v2"
 
 [rag.llm]
-provider = "ollama"    # or "openai", "anthropic"
-model = "llama3.2:3b"
+provider    = "ollama"
+model       = "llama3.2:3b"
 temperature = 0.1
 
 [rag.retrieval]
 top_k = 5
 
-[rag.infrastructure]
-ollama_host = "http://localhost:11434"
+[rag.ingestion]
+raw_data_dir = "corpus/raw_data"
 ```
 
-## Notes
+All paths are relative to the repo root.
 
-- API keys for OpenAI/Anthropic are read from environment variables.
-  - `eval --fast` skips LLM-based ragas scoring and runs embedding-only checks.

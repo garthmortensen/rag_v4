@@ -15,20 +15,53 @@ flowchart TD
     DB --> Q
 ```
 
+## Generalized lifecycle
+
+### Ingest
+
+```
+documents
+↓
+chunking
+↓
+embedding model
+↓
+vectors
+↓
+stored in Chroma
+
+```
+
+### query
+
+```
+question
+↓
+same embedding model
+↓
+query vector
+↓
+nearest chunks from Chroma
+↓
+LLM prompt
+↓
+answer
+```
+
 ## query.py Internal Flow — Manual Orchestration
 
 ```mermaid
 flowchart TD
-    CFG["load_config<br/>rag.toml"]
-    EMB["build_embedder<br/>HuggingFaceEmbeddings"]
-    VS["build_vectorstore<br/>Chroma read-only"]
-    LLM["build_llm<br/>ChatOllama"]
-    Q([question])
-    RET["retrieve_chunks<br/>similarity_search top-k"]
-    CTX["build_context<br/>join chunk text"]
-    PRM["build_prompt<br/>PROMPT_TEMPLATE"]
-    ASK["ask_llm<br/>llm.invoke"]
-    RES([answer + sources])
+    CFG["load_config<br/>rag.toml<br/><i>reads chunk size, model names, paths, top-k</i>"]
+    EMB["build_embedder<br/>HuggingFaceEmbeddings<br/><i>loads model that converts text → float vector<br/>must match the model used at ingest time</i>"]
+    VS["build_vectorstore<br/>Chroma read-only<br/><i>opens the DB of doc vectors already built at ingest</i>"]
+    LLM["build_llm<br/>ChatOllama<br/><i>connects to local Ollama process</i>"]
+    Q([question<br/><i>plain text string from caller</i>])
+    RET["retrieve_chunks<br/>similarity_search top-k<br/><i>vectorizes question, finds k nearest doc chunks<br/>by cosine distance in the embedding space</i>"]
+    CTX["build_context<br/>join chunk text<br/><i>concatenates chunk .page_content into one string</i>"]
+    PRM["build_prompt<br/>PROMPT_TEMPLATE<br/><i>fills template slots: {context} and {question}</i>"]
+    ASK["ask_llm<br/>llm.invoke<br/><i>sends filled prompt to LLM, returns .content string</i>"]
+    RES([answer + sources<br/><i>dict: answer str + source Documents</i>])
 
     CFG --> EMB --> VS
     CFG --> LLM
@@ -79,3 +112,18 @@ flowchart TD
     STR --> ANS
     RET2 --> SRC
 ```
+
+## Huge thing
+
+The embedding model quality often matters MORE than the LLM for RAG quality.
+
+Bad retrieval = bad answers.
+
+Watch for:
+
+- bad chunking
+- weak embeddings
+- wrong top-k
+- noisy documents
+- overlap settings
+- retrieval strategy

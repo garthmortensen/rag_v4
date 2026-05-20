@@ -11,14 +11,19 @@ Supported file types: HTML, PDF, CSV
 """
 
 from pathlib import Path
+import logging
 
 import chromadb
+from chromadb.errors import NotFoundError as ChromaNotFoundError
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import BSHTMLLoader, CSVLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from rag.config import load_config
+
+# pypdf logs a warning for every malformed object in a corrupt PDF — suppress them.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 LOADERS = {
     ".html": BSHTMLLoader,
@@ -31,8 +36,15 @@ def load_docs(source_dir: Path) -> list:
     docs = []
     for file in sorted(source_dir.iterdir()):
         loader_cls = LOADERS.get(file.suffix.lower())
-        if loader_cls:
-            docs.extend(loader_cls(str(file)).load())
+        if loader_cls is None:
+            continue
+        if file.suffix.lower() == ".html":
+            # latin-1 maps all 256 byte values, so it never raises UnicodeDecodeError.
+            # Scraped HTML files often mix encodings; latin-1 is a safe fallback.
+            loader = BSHTMLLoader(str(file), open_encoding="latin-1")
+        else:
+            loader = loader_cls(str(file))
+        docs.extend(loader.load())
     return docs
 
 
@@ -56,13 +68,15 @@ def ingest():
 
     embedder = build_embedder(cfg)
 
-    # Reset: delete the collection so every run starts fresh.
     client = chromadb.PersistentClient(path=cfg.vector_db_dir)
+
+    # Skip if collection already exists — delete corpus/vector_db/ to force a rebuild.
     try:
-        client.delete_collection(cfg.collection_name)
-        print(f"  Dropped existing collection '{cfg.collection_name}'")
-    except ValueError:
-        pass  # collection didn't exist yet
+        client.get_collection(cfg.collection_name)
+        print(f"  Collection '{cfg.collection_name}' already exists — skipping.")
+        return
+    except ChromaNotFoundError:
+        pass  # collection doesn't exist yet, proceed
 
     Chroma.from_documents(
         chunks,

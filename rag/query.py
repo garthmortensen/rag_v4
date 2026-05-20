@@ -77,14 +77,19 @@ def build_llm(cfg):
 
 
 def build_chain(vectorstore, llm, top_k):
-    retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
-    prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+    retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})  # LCEL: vectorstore → Runnable
+    prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)        # LCEL: prompt → Runnable
+
+    # LCEL: | pipes each step's output into the next.
+    # The dict runs retriever + passthrough in parallel to fill {context} and {question}.
     answer_chain = (
         {"context": retriever, "question": RunnablePassthrough()}
         | prompt
         | llm
-        | StrOutputParser()
+        | StrOutputParser()  # LCEL: AIMessage → plain string
     )
+
+    # LCEL: runs answer_chain and retriever in parallel → {"answer": str, "sources": list}
     return RunnableParallel(answer=answer_chain, sources=retriever)
 
 

@@ -1,6 +1,5 @@
 # RAG config file
 
-# Top-level rag namespace. Specific settings are grouped below
 [rag]
 
 # --- Chunking ---
@@ -14,13 +13,13 @@ collection_name = "rag_docs"
 vector_db_dir   = "corpus/vector_db"
 
 # --- Embedder ---
-# Options: "huggingface" (requires uv sync --extra hf) or "ollama"
+# Options: "huggingface" (requires uv sync --extra hf)
 [rag.embedder]
 type  = "huggingface"
 model = "all-MiniLM-L6-v2"
 
 # --- LLM ---
-# Providers: "ollama" | "openai" | "anthropic"
+# Provider: "ollama" (requires uv sync --extra ollama)
 [rag.llm]
 provider    = "ollama"
 model       = "llama3.2:3b"
