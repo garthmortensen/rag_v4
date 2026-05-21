@@ -34,7 +34,13 @@ Two calling patterns are supported:
                            question.
 """
 
+import os
+import textwrap
 from pathlib import Path
+
+# Inference runs entirely locally — text never leaves
+# HF Hub only downloads model weights
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")  # e.g. suppresses model-download progress bars
 
 import chromadb
 from langchain_chroma import Chroma
@@ -107,14 +113,41 @@ def query(question):
     return chain.invoke(question)
 
 
+# dont flood terminal
+_PREVIEW_LEN = 400  # e.g. "196 Model Documentation: First Lien Mortgage Model lower interest…"
+# Fits in terminal width
+_WRAP_WIDTH = 88
+
 def _print_result(result):
     print("\nAnswer:")
     print(result["answer"])
     print("\nSources:")
-    for chunk in result["sources"]:
-        source = chunk.metadata.get("source", "unknown")
-        preview = chunk.page_content[:120].replace("\n", " ")
-        print(f"  {Path(source).name}  —  {preview}...")
+    for i, chunk in enumerate(result["sources"], 1):  # 1-indexed, e.g. [1], [2],
+        source = chunk.metadata.get("source", "unknown")  # e.g. "/path/to/credit_risk_models.pdf"
+        page = chunk.metadata.get("page")                 # e.g. 196  (only PDF)
+        # modify and join newlines so the text wraps nicely
+        content = chunk.page_content.strip().replace("\n", " ")
+        truncated = len(content) > _PREVIEW_LEN  # when chunk is longer than preview
+        # Append "..." only when we actually cut the text short;
+        # avoids a misleading "..." on already-short chunks.
+        if truncated:
+            preview = content[:_PREVIEW_LEN] + "..."  # e.g. "…lower monthly payment..."
+        else:
+            preview = content  # short enough to show in full
+
+        # built-in textwrap.fill produces a single string with embedded newlines
+        # this allows you to print indented block prints with one print() sans loop
+        wrapped = textwrap.fill(
+            preview,
+            width=_WRAP_WIDTH,
+            initial_indent="    ",
+            subsequent_indent="    ",
+        )
+        header = f"  [{i}] {Path(source).name}"       # e.g. "  [1] credit_risk_models.pdf"
+        if page is not None:
+            header += f"  (page {page})"              # e.g. "  [1] credit_risk_models.pdf  (page 196)"
+        print(header)
+        print(wrapped)
 
 
 def main():
