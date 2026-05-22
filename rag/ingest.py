@@ -7,7 +7,7 @@ Full rebuild on every run
 Embedder: HuggingFace (langchain_huggingface / sentence-transformers)
 Vector store: ChromaDB (persistent, local)
 Text splitter: RecursiveCharacterTextSplitter
-Supported file types: HTML, PDF, CSV
+Supported file types: HTML, PDF
 """
 
 from pathlib import Path
@@ -16,7 +16,7 @@ import logging
 import chromadb
 from chromadb.errors import NotFoundError as ChromaNotFoundError
 from langchain_chroma import Chroma
-from langchain_community.document_loaders import BSHTMLLoader, CSVLoader, PyPDFLoader
+from langchain_community.document_loaders import BSHTMLLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -28,7 +28,6 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 LOADERS = {
     ".html": BSHTMLLoader,
     ".pdf":  PyPDFLoader,
-    ".csv":  CSVLoader,
 }
 
 
