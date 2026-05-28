@@ -2,6 +2,10 @@
 
 LangChain RAG pipeline over a local corpus of HTML, PDF, and CSV documents.
 
+Justification for RAGing open source docs: enclosed answer space. I want answers sourced from these docs and these docs alone, with confidence.
+
+Consider CRAG.
+
 ## Repository layout
 
 ```text
@@ -9,12 +13,14 @@ corpus/
   data_sources.csv      # source list: Name, Category, Filetype, Link
   downloader.py         # step 1 — fetch source documents
   raw_data/             # documents already downloaded
-  raw_data2/            # output directory for downloader.py
+  raw_data2/            # output directory for downloader.py (created on first run)
   vector_db/            # ChromaDB persistence (created by ingest)
 rag/
   config.py           # loads rag.toml into a Config dataclass
   ingest.py           # step 2 — embed documents into ChromaDB
   query.py            # step 3 — ask questions, get answers
+  ui.py               # Streamlit chat UI  (streamlit run rag/ui.py)
+  benchmark.py        # time each pipeline stage
 ```
 
 ## Setup
@@ -39,15 +45,16 @@ Already-downloaded files are skipped. Update `raw_data_dir` in `rag.toml` to poi
 
 ## Step 2 — Ingest documents into ChromaDB
 
-Run from `langchain_impl/`:
+Run from the **repo root**:
 
 ```bash
 uv run python -m rag.ingest
 ```
 
-Reads all `.html`, `.pdf`, and `.csv` files from `raw_data_dir`, splits them into
+Reads all `.html` and `.pdf` files from `raw_data_dir`, splits them into
 chunks, embeds each chunk with the HuggingFace model, and stores everything in
-ChromaDB. **Fully rebuilds the collection on every run.**
+ChromaDB. **Skips ingestion if the collection already exists.**  
+Delete `corpus/vector_db/` to force a full rebuild.
 
 ## Step 3 — Query
 

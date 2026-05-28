@@ -21,8 +21,8 @@ independent. Both must use the same model name so vectors are compatible.
 cfg.embedder type field is currently ignored (always HuggingFace), matching
 ingest.py behaviour.
 
-Only Ollama is supported as an LLM provider. build_llm() constructs a
-ChatOllama instance from cfg.llm_model and cfg.llm_temperature.
+Supported LLM providers: "ollama", "openai", "anthropic".
+build_llm() selects the appropriate LangChain chat model from cfg.llm_provider.
 
 Two calling patterns are supported:
   query(question)          Single-shot. Rebuilds all objects on every call.
@@ -34,13 +34,20 @@ Two calling patterns are supported:
                            question.
 """
 
+import logging
 import os
-import textwrap
 from pathlib import Path
 
 # Inference runs entirely locally — text never leaves
 # HF Hub only downloads model weights
-os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")  # e.g. suppresses model-download progress bars
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")      # disables analytics/usage telemetry
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")           # suppresses "unauthenticated requests" warning
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")  # suppresses model-download progress bars
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")     # suppresses transformers key-mismatch warnings
+
+# sentence-transformers prints a "BertModel LOAD REPORT" table via its own logger;
+# the TRANSFORMERS_VERBOSITY env var doesn't reach it — silence it directly.
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 import chromadb
 from langchain_chroma import Chroma
@@ -51,6 +58,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 
 from rag.config import load_config
+from rag.evaluate import build_scorer, print_scores, score as ragas_score
 
 
 PROMPT_TEMPLATE = """\
@@ -79,7 +87,16 @@ def build_vectorstore(cfg, embedder):
 
 
 def build_llm(cfg):
-    return ChatOllama(model=cfg.llm_model, temperature=cfg.llm_temperature)
+    provider = cfg.llm_provider
+    if provider == "ollama":
+        return ChatOllama(model=cfg.llm_model, temperature=cfg.llm_temperature)
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(model=cfg.llm_model, temperature=cfg.llm_temperature)
+    if provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(model=cfg.llm_model, temperature=cfg.llm_temperature)
+    raise ValueError(f"Unknown llm provider {provider!r}. Choose: ollama, openai, anthropic")
 
 
 def build_chain(vectorstore, llm, top_k):
@@ -113,41 +130,31 @@ def query(question):
     return chain.invoke(question)
 
 
-# dont flood terminal
-_PREVIEW_LEN = 400  # e.g. "196 Model Documentation: First Lien Mortgage Model lower interest…"
-# Fits in terminal width
-_WRAP_WIDTH = 88
-
-def _print_result(result):
-    print("\nAnswer:")
-    print(result["answer"])
-    print("\nSources:")
+def _print_result(result, question: str = ""):
+    # --- ChromaDB retrieval (printed first so you can audit before reading the answer) ---
+    print(f"\nChromaDB query: {question!r}")
+    print(f"Retrieved {len(result['sources'])} chunk(s):")
     for i, chunk in enumerate(result["sources"], 1):  # 1-indexed, e.g. [1], [2],
         source = chunk.metadata.get("source", "unknown")  # e.g. "/path/to/credit_risk_models.pdf"
         page = chunk.metadata.get("page")                 # e.g. 196  (only PDF)
-        # modify and join newlines so the text wraps nicely
-        content = chunk.page_content.strip().replace("\n", " ")
-        truncated = len(content) > _PREVIEW_LEN  # when chunk is longer than preview
-        # Append "..." only when we actually cut the text short;
-        # avoids a misleading "..." on already-short chunks.
-        if truncated:
-            preview = content[:_PREVIEW_LEN] + "..."  # e.g. "…lower monthly payment..."
-        else:
-            preview = content  # short enough to show in full
-
-        # built-in textwrap.fill produces a single string with embedded newlines
-        # this allows you to print indented block prints with one print() sans loop
-        wrapped = textwrap.fill(
-            preview,
-            width=_WRAP_WIDTH,
-            initial_indent="    ",
-            subsequent_indent="    ",
-        )
         header = f"  [{i}] {Path(source).name}"       # e.g. "  [1] credit_risk_models.pdf"
         if page is not None:
             header += f"  (page {page})"              # e.g. "  [1] credit_risk_models.pdf  (page 196)"
         print(header)
-        print(wrapped)
+
+        # All metadata fields — lets you audit exactly what ChromaDB returned
+        for key, val in chunk.metadata.items():
+            print(f"    {key}: {val}")
+
+        # Full chunk text, untruncated
+        print("    --- chunk content ---")
+        for line in chunk.page_content.strip().splitlines():
+            print(f"    {line}")
+        print()
+
+    # --- LLM answer ---
+    print("Answer:")
+    print(result["answer"])
 
 
 def main():
@@ -160,6 +167,7 @@ def main():
     print("Type 'quit' or 'exit' to stop.\n")
 
     chain = build_chain(vectorstore, llm, cfg.top_k)
+    scorer = build_scorer(cfg) if cfg.eval_enabled else None
 
     while True:
         question = input("Question: ").strip()
@@ -168,7 +176,9 @@ def main():
         if not question:
             continue
         result = chain.invoke(question)
-        _print_result(result)
+        _print_result(result, question)
+        if scorer is not None:
+            print_scores(ragas_score(question, result, scorer))
         print()
 
 

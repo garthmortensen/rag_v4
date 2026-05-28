@@ -12,6 +12,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "beautifulsoup4>=4.14.3",
     "lxml>=5.0",
+    "streamlit>=1.35",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +20,7 @@ hf = ["langchain-huggingface>=0.1", "sentence-transformers>=3.0"]
 ollama = ["langchain-ollama>=0.2"]
 openai = ["langchain-openai>=0.2"]
 anthropic = ["langchain-anthropic>=0.2"]
+ragas = ["ragas>=0.4"]
 dev = ["pytest>=8", "ruff>=0.4"]
 
 [build-system]

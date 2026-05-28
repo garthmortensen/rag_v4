@@ -41,6 +41,12 @@ class Config:
     llm_model: str = "llama3.2:3b"
     llm_temperature: float = 0.1
 
+    # Evaluation — judge LLM for RAGAS scoring (needs structured-output capability)
+    # provider: "ollama" | "openai" | "anthropic"
+    eval_enabled: bool = False
+    eval_provider: str = "ollama"
+    eval_model: str = ""
+
     # Retrieval
     top_k: int = 5
 
@@ -74,6 +80,10 @@ def load_config(path: str = "rag.toml") -> Config:
     cfg.llm_provider     = llm_cfg.get("provider",    cfg.llm_provider)
     cfg.llm_model        = llm_cfg.get("model",       cfg.llm_model)
     cfg.llm_temperature  = llm_cfg.get("temperature", cfg.llm_temperature)
+    eval_cfg             = raw.get("evaluation", {})
+    cfg.eval_enabled     = eval_cfg.get("enabled",   cfg.eval_enabled)
+    cfg.eval_provider    = eval_cfg.get("provider",  cfg.eval_provider)
+    cfg.eval_model       = eval_cfg.get("model",     cfg.eval_model)
     cfg.top_k            = retrieval_cfg.get("top_k", cfg.top_k)
     cfg.raw_data_dir     = raw.get("ingestion", {}).get("raw_data_dir", cfg.raw_data_dir)
 

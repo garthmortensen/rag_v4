@@ -19,16 +19,24 @@ type  = "huggingface"
 model = "all-MiniLM-L6-v2"
 
 # --- LLM ---
-# Provider: "ollama" (requires uv sync --extra ollama)
+# Provider: "ollama" | "openai" | "anthropic"
 [rag.llm]
-provider    = "ollama"
-model       = "llama3.2:3b"
-temperature = 0.1
+provider    = "openai"
+model       = "gpt-4o-mini"
+temperature = 0.01
 
 # --- Retrieval ---
 [rag.retrieval]
-top_k = 5
+top_k = 10
 
 # --- Ingestion ---
 [rag.ingestion]
 raw_data_dir = "corpus/raw_data"
+
+# --- Evaluation ---
+# Judge LLM for RAGAS faithfulness scoring.
+# provider: "ollama" | "openai" | "anthropic"
+[rag.evaluation]
+enabled = true
+provider = "openai"
+model = "gpt-4o-mini"
