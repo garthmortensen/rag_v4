@@ -79,6 +79,16 @@ def build_embedder(cfg):
 
 def build_vectorstore(cfg, embedder):
     client = chromadb.PersistentClient(path=cfg.vector_db_dir)
+    try:
+        count = client.get_collection(cfg.collection_name).count()
+        if count == 0:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Collection '%s' exists but is empty — did you forget to run ingest?",
+                cfg.collection_name,
+            )
+    except Exception:
+        pass
     return Chroma(
         client=client,
         collection_name=cfg.collection_name,

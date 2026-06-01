@@ -51,8 +51,9 @@ def build_embedder(cfg):
     return HuggingFaceEmbeddings(model_name=cfg.embedder_model)
 
 
-def ingest():
-    cfg = load_config()
+def ingest(cfg=None):
+    if cfg is None:
+        cfg = load_config()
     source_dir = Path(cfg.raw_data_dir)
 
     print(f"Loading documents from {source_dir} ...")
@@ -69,11 +70,16 @@ def ingest():
 
     client = chromadb.PersistentClient(path=cfg.vector_db_dir)
 
-    # Skip if collection already exists — delete corpus/vector_db/ to force a rebuild.
+    # Skip only if the collection already has documents.
+    # (Chroma silently creates empty collections when they are opened for querying,
+    # so existence alone is not a reliable signal.)
     try:
-        client.get_collection(cfg.collection_name)
-        print(f"  Collection '{cfg.collection_name}' already exists — skipping.")
-        return
+        existing = client.get_collection(cfg.collection_name)
+        if existing.count() > 0:
+            print(f"  Collection '{cfg.collection_name}' already populated ({existing.count()} chunks) — skipping.")
+            return
+        # Empty shell left by a previous query — delete and re-ingest.
+        client.delete_collection(cfg.collection_name)
     except ChromaNotFoundError:
         pass  # collection doesn't exist yet, proceed
 

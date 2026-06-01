@@ -25,6 +25,7 @@ build/
 
 # ── Project-specific runtime data ─────────────────────────────────────
 corpus/vector_db/
+logs/
 
 # ── Dev notes ─────────────────────────────────────────────────────────
 welcome_back.md

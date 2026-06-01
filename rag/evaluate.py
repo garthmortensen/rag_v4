@@ -22,12 +22,22 @@ os.environ.setdefault("LITELLM_LOG", "ERROR")
 logging.getLogger("LiteLLM").setLevel(logging.ERROR)
 
 import litellm
+from ragas.embeddings.litellm_provider import LiteLLMEmbeddings
 from ragas.llms import llm_factory
 from ragas.metrics.collections import Faithfulness
+from ragas.metrics.collections.answer_relevancy import AnswerRelevancy
+from ragas.metrics.collections.context_precision import ContextPrecisionWithoutReference
 
 litellm.suppress_debug_info = True
 
 logger = logging.getLogger(__name__)
+
+# Embedding model used by AnswerRelevancy (needs semantic similarity).
+# Anthropic has no embedding API, so fall back to OpenAI's cheapest model.
+_DEFAULT_EMBED_MODEL = {
+    "openai": "openai/text-embedding-3-small",
+    "anthropic": "openai/text-embedding-3-small",
+}
 
 
 def build_scorer(cfg):
@@ -44,14 +54,41 @@ def build_scorer(cfg):
     return Faithfulness(llm=llm)
 
 
+def build_scorers(cfg) -> dict:
+    """Build all three scorers. Returns {name: scorer} dict for tune.py."""
+    eval_model = cfg.eval_model or cfg.llm_model
+    if not cfg.eval_model:
+        logger.warning(
+            "No [rag.evaluation] model configured; falling back to %s. "
+            "Small models often fail structured-output scoring — set a capable model "
+            "under [rag.evaluation] in rag.toml for reliable results.",
+            eval_model,
+        )
+    litellm_model = f"{cfg.eval_provider}/{eval_model}"
+    llm = llm_factory(litellm_model, provider="litellm", client=litellm.acompletion)
+
+    embed_model = _DEFAULT_EMBED_MODEL.get(cfg.eval_provider, f"ollama/{cfg.embedder_model}")
+    embeddings = LiteLLMEmbeddings(model=embed_model)
+
+    return {
+        "faithfulness": Faithfulness(llm=llm),
+        "answer_relevancy": AnswerRelevancy(llm=llm, embeddings=embeddings),
+        "context_precision": ContextPrecisionWithoutReference(llm=llm),
+    }
+
+
 def score(question, result, scorer):
     contexts = [doc.page_content for doc in result["sources"]]
     try:
-        val = scorer.score(
-            user_input=question,
-            response=result["answer"],
-            retrieved_contexts=contexts,
-        ).value
+        # AnswerRelevancy only takes user_input + response (no retrieved_contexts)
+        if isinstance(scorer, AnswerRelevancy):
+            val = scorer.score(user_input=question, response=result["answer"]).value
+        else:
+            val = scorer.score(
+                user_input=question,
+                response=result["answer"],
+                retrieved_contexts=contexts,
+            ).value
         if val is None or (isinstance(val, float) and math.isnan(val)):
             return None
         return val

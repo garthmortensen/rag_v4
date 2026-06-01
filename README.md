@@ -21,16 +21,23 @@ rag/
   query.py            # step 3 — ask questions, get answers
   ui.py               # Streamlit chat UI  (streamlit run rag/ui.py)
   benchmark.py        # time each pipeline stage
+  evaluate.py         # RAGAS faithfulness scoring
+  tune.py             # hyperparameter tuning — runs benchmark queries and logs results
 ```
 
 ## Setup
 
 ```bash
-uv sync --extra hf --extra ollama
+# minimum — HuggingFace embedder + whichever LLM provider you use
+uv sync --extra hf --extra ollama        # Ollama (local)
+uv sync --extra hf --extra openai        # OpenAI
+uv sync --extra hf --extra anthropic     # Anthropic
 ```
 
+Add `--extra ragas` to enable RAGAS faithfulness scoring (`eval_enabled = true` in `rag.toml`).
+
 `--extra hf` installs the HuggingFace sentence-transformers embedder.  
-`--extra ollama` installs the Ollama LLM client. Ollama must be running locally.
+Ollama must be running locally when using the `ollama` provider.
 
 ## Step 1 — Download source documents
 
@@ -76,35 +83,3 @@ for chunk in result["sources"]:
 ```
 
 `result` is always `{"answer": str, "sources": list[Document]}`.
-
-## Configuration
-
-Edit `rag.toml`:
-
-```toml
-[rag.chunking]
-chunk_size    = 1000
-chunk_overlap = 100
-
-[rag.storage]
-collection_name = "rag_docs"
-vector_db_dir   = "corpus/vector_db"
-
-[rag.embedder]
-type  = "huggingface"
-model = "all-MiniLM-L6-v2"
-
-[rag.llm]
-provider    = "ollama"
-model       = "llama3.2:3b"
-temperature = 0.1
-
-[rag.retrieval]
-top_k = 5
-
-[rag.ingestion]
-raw_data_dir = "corpus/raw_data"
-```
-
-All paths are relative to the repo root.
-

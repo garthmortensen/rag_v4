@@ -55,7 +55,7 @@ flowchart TD
     CFG["load_config<br/>rag.toml"]
     EMB["build_embedder<br/>HuggingFaceEmbeddings"]
     VS["build_vectorstore<br/>Chroma read-only"]
-    LLM["build_llm<br/>ChatOllama"]
+    LLM["build_llm<br/>ChatOllama / ChatOpenAI / ChatAnthropic"]
     Q([question])
 
     subgraph build_chain["build_chain() → chain.invoke(question)"]
@@ -65,7 +65,7 @@ flowchart TD
             direction LR
             RPAR["context: retriever<br/>question: passthrough"]
             PRM[ChatPromptTemplate]
-            OL[ChatOllama]
+            OL[LLM]
             STR[StrOutputParser]
             RPAR --> PRM --> OL --> STR
         end
