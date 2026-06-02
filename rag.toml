@@ -12,18 +12,6 @@ chunk_overlap = 200
 [rag.storage]
 vector_db_dir    = "corpus/vector_db"
 collection_name  = "chunk_size_500_chunk_overlap_200"
-collection_names = [
-    # 100
-    "chunk_size_500_chunk_overlap_100",
-    "chunk_size_1000_chunk_overlap_100",
-    "chunk_size_2000_chunk_overlap_100",
-    "chunk_size_3000_chunk_overlap_100",
-    # 200
-    "chunk_size_500_chunk_overlap_200",
-    "chunk_size_1000_chunk_overlap_200",
-    "chunk_size_2000_chunk_overlap_200",
-    "chunk_size_3000_chunk_overlap_200",
-]
 
 # --- Embedder ---
 # Options: "huggingface" (requires uv sync --extra hf)
