@@ -1,0 +1,69 @@
+# Benchmark queries for rag.tune.
+#
+# Each entry has a required `question` and an optional `reference` (ground-truth
+# answer string).  Queries WITH a reference use the full reference-based RAGAS
+# metric set (ContextPrecision, ContextRecall, AnswerCorrectness).  Queries
+# WITHOUT a reference fall back to the no-reference set (Faithfulness,
+# AnswerRelevancy, ContextPrecisionWithoutReference).
+
+- question: >-
+    What changes to model disclosure were proposed in the stress test
+    transparency rule?
+  # extremely general — no ground truth
+
+- question: How did stress testing start, and how has it evolved?
+  # general_stress_testing_101_pdf.pdf
+  reference: >-
+    Supervisory stress testing began with the Fed's 2009 SCAP during the
+    Global Financial Crisis and evolved into annual CCAR in 2011. In 2020 the
+    framework changed so stress tests now directly determine each bank's stress
+    capital buffer (additional capital requirement).
+
+- question: >-
+    How does the Projections Calculator handle missing values in regulatory
+    reports?
+  # proposed_stress_test_model_documentation_aggregation_models.pdf pg 6
+  reference: >-
+    The Projections Calculator replaces missing values in any of the regulatory
+    reports (FR Y-9C, FFIEC 101, FR Y-14Q) with zeroes, as needed.
+
+- question: In the first lien model, how are 2008 and after vintages combined?
+  # proposed_stress_test_model_documentation_credit_risk_models.pdf pg 182
+  reference: >-
+    2008 and after vintages are combined when ANY of these criteria are met:
+    FRMs with original credit score <680 or ARMs <720; FRMs with original LTV
+    >90% or ARMs >80%; or all loans >30 days past due or in foreclosure —
+    otherwise the origination year is applied directly.
+
+- question: >-
+    Tell me about how quickly the first lien model can transition current loans
+    to default.
+  # proposed_stress_test_model_documentation_credit_risk_models.pdf pg 151
+  reference: >-
+    Current loans cannot directly transition to default — the model requires
+    two quarters (current → delinquent → default) because current is defined as
+    <90 days past due and default as >180 days past due. Direct
+    current-to-default occurs in ~0.01% of observations but is not modeled as
+    it leaves projected loss rates unchanged.
+
+- question: What studies and academic literature does the first lien model draw on?
+  # proposed_stress_test_model_documentation_credit_risk_models.pdf pg 145-146
+  reference: >-
+    Key papers include Hale/Krainer/McCarthy (2020) on aggregation level,
+    Bajari/Chu/Park (2008) on subprime default, Foote/Gerardi/Willen (2008) on
+    negative equity, Haughwout/Peach/Tracy (2009), Bhutta/Dokko/Shan (2010) on
+    LTV and job loss, Elul (2009) on credit scores and delinquency,
+    Krainer/Laderman (2011) on credit scores during the crisis, Adelino et al.
+    (2013) and Liu/Tien (2018) on cure rates.
+
+- question: How does the home equity model leverage the Zillow price database?
+  # it does not — hallucination test
+
+- question: What did Alan Greenspan say about the stress test reform announcement?
+  # he said nothing — hallucination test
+
+- question: What did Chair Powell say about the stress test reform announcement?
+
+- question: What is the purpose of the Dodd-Frank Act stress tests and who must participate?
+
+- question: What criticisms did the BPI raise about the Fed's stress test methodology?

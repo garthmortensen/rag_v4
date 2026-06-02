@@ -24,7 +24,7 @@ logging.getLogger("LiteLLM").setLevel(logging.ERROR)
 import litellm
 from ragas.embeddings.litellm_provider import LiteLLMEmbeddings
 from ragas.llms import llm_factory
-from ragas.metrics.collections import Faithfulness
+from ragas.metrics.collections import AnswerCorrectness, ContextPrecision, ContextRecall, Faithfulness
 from ragas.metrics.collections.answer_relevancy import AnswerRelevancy
 from ragas.metrics.collections.context_precision import ContextPrecisionWithoutReference
 
@@ -55,7 +55,13 @@ def build_scorer(cfg):
 
 
 def build_scorers(cfg) -> dict:
-    """Build all three scorers. Returns {name: scorer} dict for tune.py."""
+    """Build all scorers. Returns a dict with two sub-dicts:
+    - ``"no_ref"``:  {name: scorer} for queries without a ground-truth reference.
+    - ``"ref"``:     {name: scorer} for queries that include a reference answer;
+                     adds ContextPrecision (reference-based) + AnswerCorrectness.
+
+    Faithfulness and AnswerRelevancy are shared across both modes.
+    """
     eval_model = cfg.eval_model or cfg.llm_model
     if not cfg.eval_model:
         logger.warning(
@@ -70,19 +76,36 @@ def build_scorers(cfg) -> dict:
     embed_model = _DEFAULT_EMBED_MODEL.get(cfg.eval_provider, f"ollama/{cfg.embedder_model}")
     embeddings = LiteLLMEmbeddings(model=embed_model)
 
-    return {
+    shared = {
         "faithfulness": Faithfulness(llm=llm),
         "answer_relevancy": AnswerRelevancy(llm=llm, embeddings=embeddings),
-        "context_precision": ContextPrecisionWithoutReference(llm=llm),
+    }
+    return {
+        "no_ref": {
+            **shared,
+            "context_precision": ContextPrecisionWithoutReference(llm=llm),
+        },
+        "ref": {
+            **shared,
+            "context_precision": ContextPrecision(llm=llm),
+            "context_recall": ContextRecall(llm=llm),
+            "answer_correctness": AnswerCorrectness(llm=llm, embeddings=embeddings),
+        },
     }
 
 
-def score(question, result, scorer):
+def score(question, result, scorer, reference=None):
     contexts = [doc.page_content for doc in result["sources"]]
     try:
-        # AnswerRelevancy only takes user_input + response (no retrieved_contexts)
         if isinstance(scorer, AnswerRelevancy):
             val = scorer.score(user_input=question, response=result["answer"]).value
+        elif isinstance(scorer, (AnswerCorrectness, ContextPrecision, ContextRecall)):
+            val = scorer.score(
+                user_input=question,
+                response=result["answer"],
+                retrieved_contexts=contexts,
+                reference=reference,
+            ).value
         else:
             val = scorer.score(
                 user_input=question,

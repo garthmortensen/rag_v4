@@ -33,6 +33,7 @@ from pathlib import Path
 from statistics import mean
 
 import structlog
+import yaml
 
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 os.environ.setdefault("HF_HUB_VERBOSITY", "error")
@@ -50,22 +51,15 @@ from rag.evaluate import build_scorers
 from rag.evaluate import score as ragas_score
 from rag.query import build_chain, build_embedder, build_llm, build_vectorstore
 
-# ---------------------------------------------------------------------------
-# Benchmark queries — edit these to match your corpus
-# ---------------------------------------------------------------------------
-QUERIES = [
-    "What changes to model disclosure were proposed in the stress test transparency rule?",  # extremely general
-    "How did stress testing start, and how has it evolved?",  # general_stress_testing_101_pdf.pdf
-    "How does the Projections Calculator handle missing values in regulatory reports?",  # proposed_stress_test_model_documentation_aggregation_models.pdf
-    "In the first lien model, how are 2008 and after vintages are combined",  # proposed_stress_test_model_documentation_credit_risk_models.pdf pg 182
-    "Tell me about how quickly first lien model can transition current loans to default",  # proposed_stress_test_model_documentation_credit_risk_models.pdf pg 151
-    "What studies and academic literature does the first lien model draw on?",  # proposed_stress_test_model_documentation_credit_risk_models.pdf pg 146, for instance
-    "How does the home equity model leverage the zillow price database?",  # it does not. hallucination test
-    "What did Alan Greenspan say about the stress test reform announcement?",  # he said nothing. hallucination test
-    "What did Chair Powell say about the stress test reform announcement?",
-    "What is the purpose of the Dodd-Frank Act stress tests and who must participate?",
-    "What criticisms did the BPI raise about the Fed's stress test methodology?",
-]
+_QUERIES_FILE = Path(__file__).resolve().parents[1] / "queries.yaml"
+
+
+def _load_queries(path: Path) -> list[tuple[str, str | None]]:
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return [(q["question"], q.get("reference")) for q in data]
+
+
+QUERIES: list[tuple[str, str | None]] = _load_queries(_QUERIES_FILE)
 
 LOG_DIR = Path(__file__).resolve().parents[1] / "logs"
 
@@ -126,7 +120,7 @@ Timestamp : {datetime.now().isoformat(timespec='seconds')}
 {'=' * 60}""")
 
 
-def print_query_result(i, total, question, answer, sources, faith, ar, cp):
+def print_query_result(i, total, question, answer, sources, faith, ar, cp, cr, ac):
     print(f"""
 --- Query {i} of {total} ---
 Q: {question}
@@ -140,12 +134,14 @@ Sources ({len(sources)} chunks):""")
             line += f"  (page {source['page']})"
         print(line)
     print(f"""
-  Faithfulness     : {format_score_for_print(faith)}
-  Answer Relevancy : {format_score_for_print(ar)}
-  Context Precision: {format_score_for_print(cp)}""")
+  Faithfulness      : {format_score_for_print(faith)}
+  Answer Relevancy  : {format_score_for_print(ar)}
+  Context Precision : {format_score_for_print(cp)}
+  Context Recall    : {format_score_for_print(cr)}
+  Answer Correctness: {format_score_for_print(ac)}""")
 
 
-def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores):
+def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores, cr_scores, ac_scores):
     def mean_str(vals):
         return f"{mean(vals):.4f}" if vals else "n/a"
 
@@ -153,9 +149,9 @@ def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores):
     print("[Summary]")
     print(f"  Queries run               : {total_queries}")
 
-    any_scored = faith_scores or ar_scores or cp_scores
+    any_scored = faith_scores or ar_scores or cp_scores or cr_scores or ac_scores
     if any_scored:
-        scored = max(len(faith_scores), len(ar_scores), len(cp_scores))
+        scored = max(len(faith_scores), len(ar_scores), len(cp_scores), len(cr_scores), len(ac_scores))
         print(f"  Queries scored            : {scored}")
         print(f"  Mean faithfulness         : {mean_str(faith_scores)}")
         if faith_scores:
@@ -163,6 +159,8 @@ def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores):
             print(f"  Max  faithfulness         : {max(faith_scores):.4f}")
         print(f"  Mean answer_relevancy     : {mean_str(ar_scores)}")
         print(f"  Mean context_precision    : {mean_str(cp_scores)}")
+        print(f"  Mean context_recall       : {mean_str(cr_scores)}  (ref queries only)")
+        print(f"  Mean answer_correctness   : {mean_str(ac_scores)}  (ref queries only)")
     else:
         print("  Faithfulness scoring      : disabled")
 
@@ -206,19 +204,25 @@ def run(cfg=None):
         faith_scores = []
         ar_scores = []
         cp_scores = []
+        cr_scores = []
+        ac_scores = []
 
-        for i, question in enumerate(QUERIES, 1):
+        for i, (question, reference) in enumerate(QUERIES, 1):
             print(f"[{i}/{len(QUERIES)}] {question}")
             result = chain.invoke(question)
             answer = result["answer"]
 
+            active_scorers = scorers.get("ref" if reference else "no_ref", {}) if scorers else {}
+
             scores = {}
-            for name, scorer in scorers.items():
-                scores[name] = ragas_score(question, result, scorer)
+            for name, scorer in active_scorers.items():
+                scores[name] = ragas_score(question, result, scorer, reference=reference)
 
             faith = scores.get("faithfulness")
             ar    = scores.get("answer_relevancy")
             cp    = scores.get("context_precision")
+            cr    = scores.get("context_recall")
+            ac    = scores.get("answer_correctness")
 
             if faith is not None:
                 faith_scores.append(faith)
@@ -226,9 +230,13 @@ def run(cfg=None):
                 ar_scores.append(ar)
             if cp is not None:
                 cp_scores.append(cp)
+            if cr is not None:
+                cr_scores.append(cr)
+            if ac is not None:
+                ac_scores.append(ac)
 
             sources = build_source_list(result["sources"])
-            print_query_result(i, len(QUERIES), question, answer, sources, faith, ar, cp)
+            print_query_result(i, len(QUERIES), question, answer, sources, faith, ar, cp, cr, ac)
 
             log.info(
                 "query_result",
@@ -236,27 +244,34 @@ def run(cfg=None):
                 question=question,
                 answer=answer,
                 sources=sources,
+                reference=reference,
                 faithfulness=faith,
                 answer_relevancy=ar,
                 context_precision=cp,
+                context_recall=cr,
+                answer_correctness=ac,
             )
 
         mean_faith = mean(faith_scores) if faith_scores else None
         mean_ar    = mean(ar_scores)    if ar_scores    else None
         mean_cp    = mean(cp_scores)    if cp_scores    else None
+        mean_cr    = mean(cr_scores)    if cr_scores    else None
+        mean_ac    = mean(ac_scores)    if ac_scores    else None
 
         log.info(
             "run_summary",
             queries_run=len(QUERIES),
-            queries_scored=max(len(faith_scores), len(ar_scores), len(cp_scores), 0),
+            queries_scored=max(len(faith_scores), len(ar_scores), len(cp_scores), len(cr_scores), len(ac_scores), 0),
             mean_faithfulness=mean_faith,
             min_faithfulness=min(faith_scores) if faith_scores else None,
             max_faithfulness=max(faith_scores) if faith_scores else None,
             mean_answer_relevancy=mean_ar,
             mean_context_precision=mean_cp,
+            mean_context_recall=mean_cr,
+            mean_answer_correctness=mean_ac,
         )
 
-        print_run_summary(len(QUERIES), faith_scores, ar_scores, cp_scores)
+        print_run_summary(len(QUERIES), faith_scores, ar_scores, cp_scores, cr_scores, ac_scores)
 
     finally:
         log_file.close()
