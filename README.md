@@ -13,16 +13,19 @@ corpus/
   data_sources.csv      # source list: Name, Category, Filetype, Link
   downloader.py         # step 1 — fetch source documents
   raw_data/             # documents already downloaded
-  raw_data2/            # output directory for downloader.py (created on first run)
   vector_db/            # ChromaDB persistence (created by ingest)
 rag/
-  config.py           # loads rag.toml into a Config dataclass
-  ingest.py           # step 2 — embed documents into ChromaDB
-  query.py            # step 3 — ask questions, get answers
-  ui.py               # Streamlit chat UI  (streamlit run rag/ui.py)
-  benchmark.py        # time each pipeline stage
-  evaluate.py         # RAGAS faithfulness scoring
-  tune.py             # hyperparameter tuning — runs benchmark queries and logs results
+  config.py             # loads rag.toml into a Config dataclass
+  ingest.py             # step 2 — embed documents into ChromaDB
+  query.py              # step 3 — ask questions, get answers
+  ui.py                 # Streamlit chat UI  (streamlit run rag/ui.py)
+  benchmark.py          # time each pipeline stage
+  evaluate.py           # RAGAS faithfulness / relevancy / precision scoring
+  tune.py               # hyperparameter tuning — runs benchmark queries and logs results
+run_all.py              # ingest and/or tune all chunk_size × chunk_overlap combinations
+parse_logs.py           # aggregate logs/ into tune_comparison.md
+plot_logs.py            # render faithfulness / relevancy / precision heatmaps from logs/
+logs/                   # timestamped JSON-lines tune logs (created by run_all.py)
 ```
 
 ## Setup
@@ -83,3 +86,20 @@ for chunk in result["sources"]:
 ```
 
 `result` is always `{"answer": str, "sources": list[Document]}`.
+
+## Hyperparameter tuning
+
+Edit `CHUNK_SIZES` and `CHUNK_OVERLAPS` at the top of `run_all.py`, then run:
+
+```bash
+uv run python run_all.py          # ingest all combinations, then tune each one
+uv run python run_all.py ingest   # ingest only (skips existing collections)
+uv run python run_all.py tune     # tune only (collections must already exist)
+```
+
+Tune logs are written to `logs/` as JSON-lines files. Summarise and compare:
+
+```bash
+uv run python parse_logs.py   # writes tune_comparison.md
+uv run python plot_logs.py    # writes faithfulness/answer_relevancy/context_precision heatmaps (PNG)
+```
