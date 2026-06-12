@@ -24,7 +24,7 @@ logging.getLogger("LiteLLM").setLevel(logging.ERROR)
 import litellm
 from ragas.embeddings.litellm_provider import LiteLLMEmbeddings
 from ragas.llms import llm_factory
-from ragas.metrics.collections import AnswerCorrectness, ContextPrecision, ContextRecall, Faithfulness
+from ragas.metrics.collections import AnswerCorrectness, ContextPrecision, ContextRecall, Faithfulness, NoiseSensitivity
 from ragas.metrics.collections.answer_relevancy import AnswerRelevancy
 from ragas.metrics.collections.context_precision import ContextPrecisionWithoutReference
 
@@ -90,6 +90,7 @@ def build_scorers(cfg) -> dict:
             "context_precision": ContextPrecision(llm=llm),
             "context_recall": ContextRecall(llm=llm),
             "answer_correctness": AnswerCorrectness(llm=llm, embeddings=embeddings),
+            "noise_sensitivity": NoiseSensitivity(llm=llm),
         },
     }
 
@@ -99,7 +100,7 @@ def score(question, result, scorer, reference=None):
     try:
         if isinstance(scorer, AnswerRelevancy):
             val = scorer.score(user_input=question, response=result["answer"]).value
-        elif isinstance(scorer, (AnswerCorrectness, ContextPrecision, ContextRecall)):
+        elif isinstance(scorer, (AnswerCorrectness, ContextPrecision, ContextRecall, NoiseSensitivity)):
             val = scorer.score(
                 user_input=question,
                 response=result["answer"],

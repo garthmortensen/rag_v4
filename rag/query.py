@@ -58,7 +58,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 
 from rag.config import load_config
-from rag.evaluate import build_scorer, print_scores, score as ragas_score
+from rag.ragas_scoring import build_scorer, print_scores, score as ragas_score
 
 
 PROMPT_TEMPLATE = """\

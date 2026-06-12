@@ -1,9 +1,9 @@
-"""Benchmark each stage of the query pipeline.
+"""Time each stage of the query pipeline.
 
 Usage::
 
-    python -m rag.benchmark
-    python -m rag.benchmark "your question here"
+    python -m rag.performance_test
+    python -m rag.performance_test "your question here"
 """
 
 import sys

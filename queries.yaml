@@ -6,11 +6,6 @@
 # WITHOUT a reference fall back to the no-reference set (Faithfulness,
 # AnswerRelevancy, ContextPrecisionWithoutReference).
 
-- question: >-
-    What changes to model disclosure were proposed in the stress test
-    transparency rule?
-  # extremely general — no ground truth
-
 - question: How did stress testing start, and how has it evolved?
   # general_stress_testing_101_pdf.pdf
   reference: >-
@@ -57,13 +52,10 @@
     (2013) and Liu/Tien (2018) on cure rates.
 
 - question: How does the home equity model leverage the Zillow price database?
-  # it does not — hallucination test
+  # N/A — hallucination test
 
 - question: What did Alan Greenspan say about the stress test reform announcement?
-  # he said nothing — hallucination test
+  # N/A — hallucination test
 
-- question: What did Chair Powell say about the stress test reform announcement?
-
-- question: What is the purpose of the Dodd-Frank Act stress tests and who must participate?
-
-- question: What criticisms did the BPI raise about the Fed's stress test methodology?
+- question: What was Michael Jackson's top selling album?
+  # N/A — hallucination test

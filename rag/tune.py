@@ -47,11 +47,12 @@ warnings.filterwarnings("ignore", message="Unclosed client session", category=Re
 warnings.filterwarnings("ignore", message="Unclosed connector", category=ResourceWarning)
 
 from rag.config import load_config
-from rag.evaluate import build_scorers
-from rag.evaluate import score as ragas_score
+from rag.ragas_scoring import build_scorers
+from rag.ragas_scoring import score as ragas_score
 from rag.query import build_chain, build_embedder, build_llm, build_vectorstore
 
 _QUERIES_FILE = Path(__file__).resolve().parents[1] / "queries.yaml"
+_FLASHCARDS_FILE = Path(__file__).resolve().parents[1] / "flashcards.yaml"
 
 
 def _load_queries(path: Path) -> list[tuple[str, str | None]]:
@@ -59,7 +60,9 @@ def _load_queries(path: Path) -> list[tuple[str, str | None]]:
     return [(q["question"], q.get("reference")) for q in data]
 
 
-QUERIES: list[tuple[str, str | None]] = _load_queries(_QUERIES_FILE)
+QUERIES: list[tuple[str, str | None]] = (
+    _load_queries(_QUERIES_FILE) + _load_queries(_FLASHCARDS_FILE)
+)
 
 LOG_DIR = Path(__file__).resolve().parents[1] / "logs"
 
@@ -120,7 +123,7 @@ Timestamp : {datetime.now().isoformat(timespec='seconds')}
 {'=' * 60}""")
 
 
-def print_query_result(i, total, question, answer, sources, faith, ar, cp, cr, ac):
+def print_query_result(i, total, question, answer, sources, faith, ar, cp, cr, ac, ns):
     print(f"""
 --- Query {i} of {total} ---
 Q: {question}
@@ -138,10 +141,11 @@ Sources ({len(sources)} chunks):""")
   Answer Relevancy  : {format_score_for_print(ar)}
   Context Precision : {format_score_for_print(cp)}
   Context Recall    : {format_score_for_print(cr)}
-  Answer Correctness: {format_score_for_print(ac)}""")
+  Answer Correctness: {format_score_for_print(ac)}
+  Noise Sensitivity : {format_score_for_print(ns)}""")
 
 
-def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores, cr_scores, ac_scores):
+def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores, cr_scores, ac_scores, ns_scores):
     def mean_str(vals):
         return f"{mean(vals):.4f}" if vals else "n/a"
 
@@ -149,9 +153,9 @@ def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores, cr_scor
     print("[Summary]")
     print(f"  Queries run               : {total_queries}")
 
-    any_scored = faith_scores or ar_scores or cp_scores or cr_scores or ac_scores
+    any_scored = faith_scores or ar_scores or cp_scores or cr_scores or ac_scores or ns_scores
     if any_scored:
-        scored = max(len(faith_scores), len(ar_scores), len(cp_scores), len(cr_scores), len(ac_scores))
+        scored = max(len(faith_scores), len(ar_scores), len(cp_scores), len(cr_scores), len(ac_scores), len(ns_scores))
         print(f"  Queries scored            : {scored}")
         print(f"  Mean faithfulness         : {mean_str(faith_scores)}")
         if faith_scores:
@@ -161,6 +165,7 @@ def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores, cr_scor
         print(f"  Mean context_precision    : {mean_str(cp_scores)}")
         print(f"  Mean context_recall       : {mean_str(cr_scores)}  (ref queries only)")
         print(f"  Mean answer_correctness   : {mean_str(ac_scores)}  (ref queries only)")
+        print(f"  Mean noise_sensitivity    : {mean_str(ns_scores)}  (ref queries only)")
     else:
         print("  Faithfulness scoring      : disabled")
 
@@ -206,6 +211,7 @@ def run(cfg=None):
         cp_scores = []
         cr_scores = []
         ac_scores = []
+        ns_scores = []
 
         for i, (question, reference) in enumerate(QUERIES, 1):
             print(f"[{i}/{len(QUERIES)}] {question}")
@@ -223,6 +229,7 @@ def run(cfg=None):
             cp    = scores.get("context_precision")
             cr    = scores.get("context_recall")
             ac    = scores.get("answer_correctness")
+            ns    = scores.get("noise_sensitivity")
 
             if faith is not None:
                 faith_scores.append(faith)
@@ -234,9 +241,11 @@ def run(cfg=None):
                 cr_scores.append(cr)
             if ac is not None:
                 ac_scores.append(ac)
+            if ns is not None:
+                ns_scores.append(ns)
 
             sources = build_source_list(result["sources"])
-            print_query_result(i, len(QUERIES), question, answer, sources, faith, ar, cp, cr, ac)
+            print_query_result(i, len(QUERIES), question, answer, sources, faith, ar, cp, cr, ac, ns)
 
             log.info(
                 "query_result",
@@ -250,6 +259,7 @@ def run(cfg=None):
                 context_precision=cp,
                 context_recall=cr,
                 answer_correctness=ac,
+                noise_sensitivity=ns,
             )
 
         mean_faith = mean(faith_scores) if faith_scores else None
@@ -257,11 +267,12 @@ def run(cfg=None):
         mean_cp    = mean(cp_scores)    if cp_scores    else None
         mean_cr    = mean(cr_scores)    if cr_scores    else None
         mean_ac    = mean(ac_scores)    if ac_scores    else None
+        mean_ns    = mean(ns_scores)    if ns_scores    else None
 
         log.info(
             "run_summary",
             queries_run=len(QUERIES),
-            queries_scored=max(len(faith_scores), len(ar_scores), len(cp_scores), len(cr_scores), len(ac_scores), 0),
+            queries_scored=max(len(faith_scores), len(ar_scores), len(cp_scores), len(cr_scores), len(ac_scores), len(ns_scores), 0),
             mean_faithfulness=mean_faith,
             min_faithfulness=min(faith_scores) if faith_scores else None,
             max_faithfulness=max(faith_scores) if faith_scores else None,
@@ -269,9 +280,10 @@ def run(cfg=None):
             mean_context_precision=mean_cp,
             mean_context_recall=mean_cr,
             mean_answer_correctness=mean_ac,
+            mean_noise_sensitivity=mean_ns,
         )
 
-        print_run_summary(len(QUERIES), faith_scores, ar_scores, cp_scores, cr_scores, ac_scores)
+        print_run_summary(len(QUERIES), faith_scores, ar_scores, cp_scores, cr_scores, ac_scores, ns_scores)
 
     finally:
         log_file.close()
