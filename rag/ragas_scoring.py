@@ -100,12 +100,24 @@ def score(question, result, scorer, reference=None):
     try:
         if isinstance(scorer, AnswerRelevancy):
             val = scorer.score(user_input=question, response=result["answer"]).value
-        elif isinstance(scorer, (AnswerCorrectness, ContextPrecision, ContextRecall, NoiseSensitivity)):
+        elif isinstance(scorer, AnswerCorrectness):
             val = scorer.score(
                 user_input=question,
                 response=result["answer"],
+                reference=reference,
+            ).value
+        elif isinstance(scorer, (ContextPrecision, ContextRecall)):
+            val = scorer.score(
+                user_input=question,
                 retrieved_contexts=contexts,
                 reference=reference,
+            ).value
+        elif isinstance(scorer, NoiseSensitivity):
+            val = scorer.score(
+                user_input=question,
+                response=result["answer"],
+                reference=reference,
+                retrieved_contexts=contexts,
             ).value
         else:
             val = scorer.score(

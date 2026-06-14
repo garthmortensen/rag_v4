@@ -1,17 +1,18 @@
-"""Parse all logs/*.log tune run JSON-lines files and produce tune_comparison.md."""
+"""Parse all logs/*.log tune run JSON-lines files and produce tuning_results.md."""
 
 import json
 from pathlib import Path
 
 LOG_DIR = Path(__file__).parent / "logs"
-OUTPUT = Path(__file__).parent / "tune_comparison.md"
+OUTPUT = Path(__file__).parent / "tuning_results.md"
 
 
 def parse_log(path):
     """Return {collection, queries} from a JSON-lines log file.
 
     Each query dict has keys: query_num, question, answer, sources,
-    faithfulness, answer_relevancy, context_precision.
+    faithfulness, answer_relevancy, context_precision, context_recall,
+    answer_correctness, noise_sensitivity.
     """
     collection = path.stem
     queries = []
@@ -81,6 +82,9 @@ def build_summary_table(runs_sorted, all_q_nums):
     header_cols.append("**F Mean**")
     header_cols.append("**AR Mean**")
     header_cols.append("**CP Mean**")
+    header_cols.append("**CR Mean**")
+    header_cols.append("**AC Mean**")
+    header_cols.append("**NS Mean**")
 
     lines = []
     lines.append("| " + " | ".join(header_cols) + " |")
@@ -95,6 +99,9 @@ def build_summary_table(runs_sorted, all_q_nums):
         row.append(f"**{format_score(mean_metric(run['queries'], 'faithfulness'))}**")
         row.append(f"**{format_score(mean_metric(run['queries'], 'answer_relevancy'))}**")
         row.append(f"**{format_score(mean_metric(run['queries'], 'context_precision'))}**")
+        row.append(f"**{format_score(mean_metric(run['queries'], 'context_recall'))}**")
+        row.append(f"**{format_score(mean_metric(run['queries'], 'answer_correctness'))}**")
+        row.append(f"**{format_score(mean_metric(run['queries'], 'noise_sensitivity'))}**")
         lines.append("| " + " | ".join(row) + " |")
 
     return lines
@@ -118,7 +125,10 @@ def build_per_question_sections(runs, all_q_nums, question_texts):
             f_label  = format_score(q.get("faithfulness"))
             ar_label = format_score(q.get("answer_relevancy"))
             cp_label = format_score(q.get("context_precision"))
-            lines.append(f"### {rank}. `{collection}` \u2014 F: {f_label} | AR: {ar_label} | CP: {cp_label}\n")
+            cr_label = format_score(q.get("context_recall"))
+            ac_label = format_score(q.get("answer_correctness"))
+            ns_label = format_score(q.get("noise_sensitivity"))
+            lines.append(f"### {rank}. `{collection}` \u2014 F: {f_label} | AR: {ar_label} | CP: {cp_label} | CR: {cr_label} | AC: {ac_label} | NS: {ns_label}\n")
             lines.append(q.get("answer") or "*No answer recorded.*")
             lines.append("")
 
@@ -151,15 +161,18 @@ def main():
     all_q_nums, question_texts = collect_query_metadata(runs)
 
     lines = []
-    lines.append("# RAG Hyperparameter Tune Comparison\n")
+    lines.append("# RAG Tuning Results\n")
     lines.append(f"Generated from {len(runs)} log files in `logs/`.\n")
 
     lines.append("## Summary Table\n")
     lines.append("> - **Faithfulness (F)**: Measures whether every claim in the generated answer is supported by the retrieved context. The judge LLM extracts atomic statements from the answer and verifies each one against the chunks. A score of 1.0 means nothing was hallucinated; 0.0 means the answer is entirely unsupported. Low faithfulness usually signals the LLM is drawing on parametric knowledge instead of the retrieved documents. *Example: if the answer states \"the stress test threshold is 4.5%\" but no retrieved chunk mentions that figure, that claim is unfaithful and lowers the score.*")
     lines.append("> - **Answer Relevancy (AR)**: Measures how directly the answer addresses the question — penalising vague, incomplete, or off-topic responses. It works by prompting the LLM to generate several questions that the answer could plausibly answer, then computing the average cosine similarity of those synthetic questions back to the original. High AR means the answer is focused and on-point; low AR means it drifted or hedged excessively. *Example: if the question asks \"what is the purpose of stress testing?\" and the answer spends most of its content describing who conducts stress tests rather than why, the synthetic questions generated from it will not closely match the original, pulling AR down.*")
     lines.append("> - **Context Precision (CP)**: Measures whether the most relevant chunks appear near the top of the retrieved set. The judge LLM decides for each chunk whether it actually contributed to answering the question, then computes a precision-at-k style score that rewards relevant chunks ranked early and penalises relevant chunks buried at the bottom. Low CP suggests the retriever is returning a lot of noise before the useful material. *Example: if the single chunk that contains the answer is ranked 9th out of 10, CP will be low even though the answer was technically reachable — a better embedding or smaller chunk size would surface it earlier.*")
+    lines.append("> - **Context Recall (CR)**: What fraction of the reference answer's claims are supported by the retrieved context. High recall means the retriever found all the content needed to answer correctly. Only computed for queries with a ground-truth reference (`n/a` for no-reference queries).")
+    lines.append("> - **Answer Correctness (AC)**: How closely the generated answer matches the reference, combining factual claim overlap (NLI) with semantic similarity. Only computed for ref queries.")
+    lines.append("> - **Noise Sensitivity (NS)**: How often the LLM produces incorrect claims even when relevant context was retrieved. Lower is better. Only computed for ref queries.")
     lines.append("> ")
-    lines.append("> Collections sorted by F mean (descending). `n/a` = eval disabled or scoring failed.\n")
+    lines.append("> Collections sorted by F mean (descending). `n/a` = eval disabled, scoring failed, or no reference available.\n")
 
     table_lines = build_summary_table(runs_sorted, all_q_nums)
     lines.extend(table_lines)

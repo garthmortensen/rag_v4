@@ -5,7 +5,7 @@ scores each answer for faithfulness, and writes a timestamped JSON-lines log so
 you can compare runs with different chunk_size / chunk_overlap / top_k / temperature.
 
 Log format: one JSON object per line — events are run_start, query_result, run_summary.
-Use parse_logs.py to aggregate logs into tune_comparison.md.
+Use parse_logs.py to aggregate logs into tuning_results.md.
 
 Workflow
 --------
@@ -28,6 +28,7 @@ Usage::
 import logging
 import os
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
@@ -45,11 +46,29 @@ logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 # RAGAS/LiteLLM leave aiohttp sessions/connectors open after async scoring calls — suppress the noise.
 warnings.filterwarnings("ignore", message="Unclosed client session", category=ResourceWarning)
 warnings.filterwarnings("ignore", message="Unclosed connector", category=ResourceWarning)
+# LiteLLM async logging tasks are cancelled when each thread's event loop closes — benign noise.
+warnings.filterwarnings("ignore", message="coroutine.*was never awaited", category=RuntimeWarning)
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
 from rag.config import load_config
 from rag.ragas_scoring import build_scorers
 from rag.ragas_scoring import score as ragas_score
 from rag.query import build_chain, build_embedder, build_llm, build_vectorstore
+
+# Maximum queries to run concurrently. LLM and RAGAS calls are network-bound so
+# parallelism gives a near-linear speedup up to the API's rate limit.
+MAX_WORKERS = 10
+
+
+def _run_one(i, question, reference, chain, scorers):
+    """Worker executed in a thread-pool: invoke the chain and run all RAGAS scorers."""
+    result = chain.invoke(question)
+    active_scorers = scorers.get("ref" if reference else "no_ref", {}) if scorers else {}
+    scores = {
+        name: ragas_score(question, result, scorer, reference=reference)
+        for name, scorer in active_scorers.items()
+    }
+    return result, scores
 
 _QUERIES_FILE = Path(__file__).resolve().parents[1] / "queries.yaml"
 _FLASHCARDS_FILE = Path(__file__).resolve().parents[1] / "flashcards.yaml"
@@ -170,7 +189,7 @@ def print_run_summary(total_queries, faith_scores, ar_scores, cp_scores, cr_scor
         print("  Faithfulness scoring      : disabled")
 
 
-def run(cfg=None):
+def run(cfg=None, embedder=None):
     if cfg is None:
         cfg = load_config()
 
@@ -181,7 +200,8 @@ def run(cfg=None):
     scorers = build_scorers(cfg) if cfg.eval_enabled else {}
 
     print("Building pipeline…")
-    embedder = build_embedder(cfg)
+    if embedder is None:
+        embedder = build_embedder(cfg)
     vectorstore = build_vectorstore(cfg, embedder)
     llm = build_llm(cfg)
     chain = build_chain(vectorstore, llm, cfg.top_k)
@@ -213,16 +233,20 @@ def run(cfg=None):
         ac_scores = []
         ns_scores = []
 
-        for i, (question, reference) in enumerate(QUERIES, 1):
-            print(f"[{i}/{len(QUERIES)}] {question}")
-            result = chain.invoke(question)
+        # Submit all queries in parallel; collect results in submission order.
+        print(f"Submitting {len(QUERIES)} queries ({MAX_WORKERS} workers)…")
+        futures = []
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            for i, (question, reference) in enumerate(QUERIES, 1):
+                print(f"  [{i}/{len(QUERIES)}] {question}")
+                futures.append(
+                    (i, question, reference,
+                     executor.submit(_run_one, i, question, reference, chain, scorers))
+                )
+        # All futures are done once the executor exits; print results in order.
+        for i, question, reference, future in futures:
+            result, scores = future.result()
             answer = result["answer"]
-
-            active_scorers = scorers.get("ref" if reference else "no_ref", {}) if scorers else {}
-
-            scores = {}
-            for name, scorer in active_scorers.items():
-                scores[name] = ragas_score(question, result, scorer, reference=reference)
 
             faith = scores.get("faithfulness")
             ar    = scores.get("answer_relevancy")

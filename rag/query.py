@@ -53,7 +53,7 @@ import chromadb
 from langchain_chroma import Chroma
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from langchain_core.runnables import RunnableLambda, RunnableParallel, RunnablePassthrough
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 
@@ -113,17 +113,23 @@ def build_chain(vectorstore, llm, top_k):
     retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})  # LCEL: vectorstore → Runnable
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)        # LCEL: prompt → Runnable
 
-    # LCEL: | pipes each step's output into the next.
-    # The dict runs retriever + passthrough in parallel to fill {context} and {question}.
-    answer_chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()  # LCEL: AIMessage → plain string
-    )
+    def _format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
 
-    # LCEL: runs answer_chain and retriever in parallel → {"answer": str, "sources": list}
-    return RunnableParallel(answer=answer_chain, sources=retriever)
+    # Retrieve once, then share docs between the answer chain and sources output.
+    # Previously the retriever was invoked twice in parallel (once for context, once
+    # for sources), which caused concurrent SQLite access and intermittent CANTOPEN errors.
+    return (
+        RunnableParallel(sources=retriever, question=RunnablePassthrough())
+        | RunnablePassthrough.assign(
+            answer=RunnableLambda(
+                lambda x: prompt.invoke({"context": _format_docs(x["sources"]), "question": x["question"]})
+            )
+            | llm
+            | StrOutputParser()
+        )
+        | RunnableLambda(lambda x: {"answer": x["answer"], "sources": x["sources"]})
+    )
 
 
 def query(question):
