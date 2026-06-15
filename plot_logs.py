@@ -2,7 +2,7 @@
 
 Reads every logs/*.log file produced by run_all.py / rag.tune, extracts the mean
 faithfulness, answer_relevancy, and context_precision across all queries in the
-run, then writes one PNG per metric to the repo root.
+run, then writes one PNG per metric to results/.
 
 Collection names are expected to look like:
     chunk_size_<SIZE>_chunk_overlap_<OVERLAP>
@@ -22,7 +22,7 @@ import numpy as np
 from parse_logs import mean_metric, parse_log
 
 LOG_DIR = Path(__file__).parent / "logs"
-OUTPUT_DIR = Path(__file__).parent
+OUTPUT_DIR = Path(__file__).parent / "results"
 
 COLLECTION_NAME_RE = re.compile(r"chunk_size_(\d+)_chunk_overlap_(\d+)")
 
@@ -107,6 +107,8 @@ def main():
         return
 
     print(f"Loaded {len(runs)} runs from logs/.")
+
+    OUTPUT_DIR.mkdir(exist_ok=True)
 
     for metric_key, title, filename in METRICS:
         sizes, overlaps, grid = build_grid(runs, metric_key)

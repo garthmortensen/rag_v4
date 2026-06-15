@@ -1,21 +1,33 @@
 """Parse all logs/*.log tune run JSON-lines files and produce tuning_results.md."""
 
+import csv
 import json
 from pathlib import Path
 
 LOG_DIR = Path(__file__).parent / "logs"
-OUTPUT = Path(__file__).parent / "tuning_results.md"
+RESULTS_DIR = Path(__file__).parent / "results"
+OUTPUT = RESULTS_DIR / "tuning_results.md"
+CSV_OUTPUT = RESULTS_DIR / "tuning_results.csv"
 
 
 def parse_log(path):
-    """Return {collection, queries} from a JSON-lines log file.
+    """Return {collection, queries, complete} from a JSON-lines log file.
 
     Each query dict has keys: query_num, question, answer, sources,
     faithfulness, answer_relevancy, context_precision, context_recall,
     answer_correctness, noise_sensitivity.
+    complete is True only when a run_summary event is present (run finished without crashing).
+
+    If a companion _metrics.csv exists (written by tune.py), numeric scores are
+    loaded from it and merged in; the JSON log is used only for question/answer text.
     """
+    _SCORE_KEYS = [
+        "faithfulness", "answer_relevancy", "context_precision",
+        "context_recall", "answer_correctness", "noise_sensitivity",
+    ]
     collection = path.stem
     queries = []
+    complete = False
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -29,7 +41,27 @@ def parse_log(path):
             collection = entry.get("collection", path.stem)
         elif event == "query_result":
             queries.append(entry)
-    return dict(collection=collection, queries=queries)
+        elif event == "run_summary":
+            complete = True
+
+    # Overlay numeric scores from companion CSV if present.
+    csv_path = path.with_name(path.stem + "_metrics.csv")
+    if csv_path.exists():
+        q_map = {q["query_num"]: q for q in queries}
+        with csv_path.open(newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                num = int(row["query_num"])
+                scores = {k: (float(row[k]) if row.get(k) else None) for k in _SCORE_KEYS}
+                if num in q_map:
+                    q_map[num].update(scores)
+                else:
+                    # CSV row with no matching log entry — add a minimal stub
+                    queries.append({"query_num": num, **scores})
+        if not complete:
+            # A complete CSV means the run finished even if run_summary is absent
+            complete = len([q for q in queries if any(q.get(k) is not None for k in _SCORE_KEYS)]) > 0
+
+    return dict(collection=collection, queries=queries, complete=complete)
 
 
 def mean_metric(queries, key):
@@ -144,10 +176,14 @@ def main():
         return
 
     runs = []
+    skipped = 0
     for f in log_files:
         parsed = parse_log(f)
-        if parsed["queries"]:
+        if parsed["queries"] and parsed["complete"]:
             runs.append(parsed)
+        elif parsed["queries"] and not parsed["complete"]:
+            skipped += 1
+            print(f"Skipping incomplete run (no run_summary): {f.name}  ({len(parsed['queries'])} queries logged before crash)")
 
     if not runs:
         print("No parseable JSON-lines log files found. Re-run rag.tune to generate new logs.")
@@ -159,6 +195,8 @@ def main():
     )
 
     all_q_nums, question_texts = collect_query_metadata(runs)
+
+    RESULTS_DIR.mkdir(exist_ok=True)
 
     lines = []
     lines.append("# RAG Tuning Results\n")
@@ -184,7 +222,24 @@ def main():
 
     OUTPUT.write_text("\n".join(lines))
     print(f"Written: {OUTPUT}")
-    print(f"  {len(runs)} collections × {len(all_q_nums)} questions")
+    print(f"  {len(runs)} collections × {len(all_q_nums)} questions  ({skipped} incomplete runs skipped)")
+
+    metrics = ["faithfulness", "answer_relevancy", "context_precision", "context_recall", "answer_correctness", "noise_sensitivity"]
+    csv_header = ["collection"] + [f"{m}_mean" for m in metrics] + [f"q{n}_faithfulness" for n in all_q_nums]
+    with CSV_OUTPUT.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(csv_header)
+        for run in runs_sorted:
+            q_map = build_query_map(run)
+            row = [run["collection"]]
+            for m in metrics:
+                v = mean_metric(run["queries"], m)
+                row.append(v if v is not None else "")
+            for n in all_q_nums:
+                q = q_map.get(n)
+                row.append(q["faithfulness"] if q and q.get("faithfulness") is not None else "")
+            writer.writerow(row)
+    print(f"Written: {CSV_OUTPUT}")
 
 
 if __name__ == "__main__":
