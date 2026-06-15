@@ -25,6 +25,7 @@ Usage::
     python -m rag.tune
 """
 
+import csv
 import logging
 import os
 import warnings
@@ -196,6 +197,13 @@ def run(cfg=None, embedder=None):
     LOG_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = LOG_DIR / f"tune_{timestamp}.log"
+    csv_path = LOG_DIR / f"tune_{timestamp}_metrics.csv"
+
+    _METRICS_FIELDS = [
+        "collection", "query_num",
+        "faithfulness", "answer_relevancy", "context_precision",
+        "context_recall", "answer_correctness", "noise_sensitivity",
+    ]
 
     scorers = build_scorers(cfg) if cfg.eval_enabled else {}
 
@@ -207,6 +215,9 @@ def run(cfg=None, embedder=None):
     chain = build_chain(vectorstore, llm, cfg.top_k)
 
     log, log_file = open_json_log(log_path)
+    csv_file = open(csv_path, "w", newline="", encoding="utf-8")
+    csv_writer = csv.DictWriter(csv_file, fieldnames=_METRICS_FIELDS)
+    csv_writer.writeheader()
 
     try:
         print_run_header(cfg)
@@ -285,6 +296,17 @@ def run(cfg=None, embedder=None):
                 answer_correctness=ac,
                 noise_sensitivity=ns,
             )
+            csv_writer.writerow({
+                "collection": cfg.collection_name,
+                "query_num": i,
+                "faithfulness":       "" if faith is None else faith,
+                "answer_relevancy":   "" if ar    is None else ar,
+                "context_precision":  "" if cp    is None else cp,
+                "context_recall":     "" if cr    is None else cr,
+                "answer_correctness": "" if ac    is None else ac,
+                "noise_sensitivity":  "" if ns    is None else ns,
+            })
+            csv_file.flush()
 
         mean_faith = mean(faith_scores) if faith_scores else None
         mean_ar    = mean(ar_scores)    if ar_scores    else None
@@ -311,8 +333,10 @@ def run(cfg=None, embedder=None):
 
     finally:
         log_file.close()
+        csv_file.close()
 
-    print(f"\nLog written → {log_path}")
+    print(f"\nLog written      → {log_path}")
+    print(f"Metrics CSV      → {csv_path}")
 
 
 if __name__ == "__main__":
