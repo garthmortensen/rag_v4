@@ -5,13 +5,13 @@
 # --- Chunking ---
 [rag.chunking]
 chunk_size    = 500
-chunk_overlap = 200
+chunk_overlap = 300
 
 
 # --- Storage ---
 [rag.storage]
 vector_db_dir    = "corpus/vector_db"
-collection_name  = "chunk_size_500_chunk_overlap_200"
+collection_name  = "chunk_size_500_chunk_overlap_300"
 
 # --- Embedder ---
 # Options: "huggingface" (requires uv sync --extra hf)
