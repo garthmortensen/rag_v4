@@ -19,11 +19,11 @@ rag/
   ingest.py             # step 2 — embed documents into ChromaDB
   query.py              # step 3 — ask questions, get answers
   ui.py                 # Streamlit chat UI  (streamlit run rag/ui.py)
-  benchmark.py          # time each pipeline stage
-  evaluate.py           # RAGAS faithfulness / relevancy / precision scoring
+  performance_test.py   # time each pipeline stage
+  ragas_scoring.py      # RAGAS faithfulness / relevancy / precision scoring
   tune.py               # hyperparameter tuning — runs benchmark queries and logs results
 run_all.py              # ingest and/or tune all chunk_size × chunk_overlap combinations
-parse_logs.py           # aggregate logs/ into tune_comparison.md
+parse_logs.py           # aggregate logs/ into tuning_results.md
 plot_logs.py            # render faithfulness / relevancy / precision heatmaps from logs/
 logs/                   # timestamped JSON-lines tune logs (created by run_all.py)
 ```
@@ -50,8 +50,8 @@ Run from the **repo root**:
 python corpus/downloader.py
 ```
 
-Reads URLs from `corpus/data_sources.csv` and saves files to `corpus/raw_data2/`.  
-Already-downloaded files are skipped. Update `raw_data_dir` in `rag.toml` to point at `raw_data2/` if you want to ingest the freshly downloaded files instead of the existing `raw_data/`.
+Reads URLs from `corpus/data_sources.csv` and saves files to `corpus/raw_data/`.  
+Already-downloaded files are skipped. Update `raw_data_dir` in `rag.toml` to point at `raw_data/` if you want to ingest the freshly downloaded files instead of the existing `raw_data/`.
 
 ## Step 2 — Ingest documents into ChromaDB
 
@@ -87,7 +87,7 @@ for chunk in result["sources"]:
 
 `result` is always `{"answer": str, "sources": list[Document]}`.
 
-## Hyperparameter tuning
+## Hyperparameter tuning - complete
 
 Edit `CHUNK_SIZES` and `CHUNK_OVERLAPS` at the top of `run_all.py`, then run:
 
@@ -100,6 +100,6 @@ uv run python run_all.py tune     # tune only (collections must already exist)
 Tune logs are written to `logs/` as JSON-lines files. Summarise and compare:
 
 ```bash
-uv run python parse_logs.py   # writes tune_comparison.md
+uv run python parse_logs.py   # writes tuning_results.md
 uv run python plot_logs.py    # writes faithfulness/answer_relevancy/context_precision heatmaps (PNG)
 ```
