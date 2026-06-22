@@ -48,10 +48,13 @@ def load_docs(source_dir: Path) -> list:
 
 
 def build_embedder(cfg):
+    if cfg.embedder == "ollama":
+        from langchain_ollama import OllamaEmbeddings
+        return OllamaEmbeddings(model=cfg.embedder_model)
     return HuggingFaceEmbeddings(model_name=cfg.embedder_model)
 
 
-def ingest(cfg=None):
+def ingest(cfg=None, embedder=None):
     if cfg is None:
         cfg = load_config()
     source_dir = Path(cfg.raw_data_dir)
@@ -66,7 +69,8 @@ def ingest(cfg=None):
     ).split_documents(docs)
     print(f"  {len(chunks)} chunks after splitting")
 
-    embedder = build_embedder(cfg)
+    if embedder is None:
+        embedder = build_embedder(cfg)
 
     client = chromadb.PersistentClient(path=cfg.vector_db_dir)
 

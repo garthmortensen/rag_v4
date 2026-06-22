@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 
 CSV_FILE = "corpus/data_sources.csv"
-OUTPUT_DIR = "corpus/raw_data2"
+OUTPUT_DIR = "corpus/raw_data"
 TIMEOUT = 60
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "

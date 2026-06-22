@@ -18,8 +18,8 @@ source documents.
 build_embedder() is intentionally duplicated from ingest.py to keep modules
 independent. Both must use the same model name so vectors are compatible.
 
-cfg.embedder type field is currently ignored (always HuggingFace), matching
-ingest.py behaviour.
+cfg.embedder selects the provider ("huggingface" or "ollama"); ingest.py and
+query.py must stay in sync so query vectors match the ingested vectors.
 
 Supported LLM providers: "ollama", "openai", "anthropic".
 build_llm() selects the appropriate LangChain chat model from cfg.llm_provider.
@@ -74,6 +74,9 @@ Answer:"""
 
 
 def build_embedder(cfg):
+    if cfg.embedder == "ollama":
+        from langchain_ollama import OllamaEmbeddings
+        return OllamaEmbeddings(model=cfg.embedder_model)
     return HuggingFaceEmbeddings(model_name=cfg.embedder_model)
 
 
