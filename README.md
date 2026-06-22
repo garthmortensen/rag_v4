@@ -1,6 +1,6 @@
 # rag_v4
 
-LangChain RAG pipeline over a local corpus of HTML, PDF, and CSV documents.
+LangChain RAG pipeline over a local corpus of HTML and PDF documents.
 
 Justification for RAGing open source docs: enclosed answer space. I want answers sourced from these docs and these docs alone, with confidence.
 
@@ -39,8 +39,9 @@ uv sync --extra hf --extra anthropic     # Anthropic
 
 Add `--extra ragas` to enable RAGAS faithfulness scoring (`eval_enabled = true` in `rag.toml`).
 
-`--extra hf` installs the HuggingFace sentence-transformers embedder.  
-Ollama must be running locally when using the `ollama` provider.
+`--extra hf` installs the HuggingFace sentence-transformers embedder (`[rag.embedder] type = "huggingface"`).  
+`--extra ollama` additionally enables the Ollama embedder (`type = "ollama"`) plus the Ollama LLM provider.  
+Ollama must be running locally when using the `ollama` embedder or LLM provider.
 
 ## Step 1 — Download source documents
 
@@ -50,8 +51,8 @@ Run from the **repo root**:
 python corpus/downloader.py
 ```
 
-Reads URLs from `corpus/data_sources.csv` and saves files to `corpus/raw_data/`.  
-Already-downloaded files are skipped. Update `raw_data_dir` in `rag.toml` to point at `raw_data/` if you want to ingest the freshly downloaded files instead of the existing `raw_data/`.
+Reads URLs from `corpus/data_sources.csv` and saves files to `corpus/raw_data/` — the
+default `raw_data_dir` in `rag.toml`. Already-downloaded files are skipped.
 
 ## Step 2 — Ingest documents into ChromaDB
 
@@ -62,7 +63,8 @@ uv run python -m rag.ingest
 ```
 
 Reads all `.html` and `.pdf` files from `raw_data_dir`, splits them into
-chunks, embeds each chunk with the HuggingFace model, and stores everything in
+chunks, embeds each chunk with the configured embedder (HuggingFace or Ollama,
+set under `[rag.embedder]` in `rag.toml`), and stores everything in
 ChromaDB. **Skips ingestion if the collection already exists.**  
 Delete `corpus/vector_db/` to force a full rebuild.
 
