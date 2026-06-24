@@ -1,5 +1,9 @@
 # Model Landscape — Ollama & Hugging Face
 
+**Hugging Face** = the giant warehouse.
+
+**Ollama** = the curated app store.
+
 A one-pager to cut through the noise: what kinds of models exist, what to pick
 for what job, and how the names and tags actually work.
 
@@ -244,7 +248,7 @@ other direction (GGUF → HF) is rarely done — quantization is lossy.
 ## Rules of thumb
 
 - For RAG, embedder quality usually moves results more than LLM quality.
-- Start small, measure with `rag.tune`, scale up only if metrics demand it.
+- Start small, measure faithfulness scores, scale up only if metrics demand it.
 - If you change embedder *or* chunking, re-ingest.
 - If switching LLM provider, also swap `[rag.evaluation]` — keeping the eval
   model on a stronger provider gives more trustworthy scores.
