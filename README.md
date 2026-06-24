@@ -18,7 +18,6 @@ rag/
   config.py             # loads rag.toml into a Config dataclass
   ingest.py             # step 2 — embed documents into ChromaDB
   query.py              # step 3 — ask questions, get answers
-  ui.py                 # Streamlit chat UI  (streamlit run rag/ui.py)
   ragas_scoring.py      # RAGAS faithfulness scoring
 ```
 
